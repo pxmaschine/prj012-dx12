@@ -1,5 +1,6 @@
 ### Custom ###
 Build/
+.vscode
 
 # Created by https://www.toptal.com/developers/gitignore/api/windows,c++,visualstudio,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows,c++,visualstudio,visualstudiocode

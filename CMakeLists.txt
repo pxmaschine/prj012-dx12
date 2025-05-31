@@ -3,6 +3,8 @@ project(prj012_dx12)
 
 set(EXECUTABLE_NAME "Game")
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 ##########################################################################################
 # Project output directories for all builds (Debug, Release, etc.)
 ##########################################################################################
@@ -31,7 +33,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/RelWithDeb
 
 add_subdirectory(Source)
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/ ${PROJECT_SOURCE_DIR}/Source)
+# target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ ${CMAKE_CURRENT_SOURCE_DIR}/Source)
 set_target_properties(${PROJECT_NAME} PROPERTIES
   OUTPUT_NAME ${EXECUTABLE_NAME}
 
@@ -57,10 +59,11 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
-target_compile_definitions(${PROJECT_NAME} PUBLIC 
-  -DNOMINMAX
-)
 if (MSVC)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC 
+    -DNOMINMAX
+    -WIN32_LEAN_AND_MEAN
+  )
   target_compile_options(${PROJECT_NAME} PUBLIC 
     /W4 
     /WX 
@@ -76,6 +79,15 @@ endif()
 ##########################################################################################
 # Linking out libraries
 ##########################################################################################
+target_link_libraries(${PROJECT_NAME} PRIVATE
+  d3d12headers
+)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE
+  d3d12.lib
+  dxgi.lib
+  dxguid.lib
+)
 
 ##########################################################################################
 # Post-Build Commands
