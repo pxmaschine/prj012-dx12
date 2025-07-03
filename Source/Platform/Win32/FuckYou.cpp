@@ -66,10 +66,6 @@ int CALLBACK WinMain(
   LPSTR lpCmdLine,
   int nCmdShow)
 {
-  LARGE_INTEGER perf_count_frequency_result;
-  QueryPerformanceFrequency(&perf_count_frequency_result);
-  g_perf_count_frequency = perf_count_frequency_result.QuadPart;
-
   win32_create_window(hInstance, L"Hello World Window", g_client_width, g_client_height);
 
   g_dx12_state = make_unique_ptr<DX12State>(g_window_handle, g_client_width, g_client_height);
@@ -174,132 +170,28 @@ int CALLBACK WinMain(
 
   auto cube_pipeline = g_dx12_state->create_graphics_pipeline(pipeline_desc);
 
-  // TODO: Remove DirectX Math library
-  // Check for DirectX Math library support.
-  if (!DirectX::XMVerifyCPUSupport())
-  {
-    MessageBoxA(NULL, "Failed to verify DirectX Math library support.", "Error", MB_OK | MB_ICONERROR);
-    return false;
-  }
-
   game_input input[2] = {};
   game_input* new_input = &input[0];
   game_input* old_input = &input[1];
 
-  LARGE_INTEGER last_counter = win32_get_wall_clock();
-  LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
-
-  // win32_toggle_fullscreen(g_window_handle);
-
-  HDC renderer_dc = GetDC(g_window_handle);
-  s32 monitor_refresh_hz = 60;
-  s32 win32_refresh_rate = GetDeviceCaps(renderer_dc, VREFRESH);
-  if (win32_refresh_rate > 1)
-  {
-    monitor_refresh_hz = win32_refresh_rate;
-  }
-  f32 game_update_hz = (f32)(monitor_refresh_hz);
-
   g_running = true;
-
   ::ShowWindow(g_window_handle, SW_SHOWMAXIMIZED);
-  //::ShowWindow(g_window_handle, SW_SHOW);
-
-  u32 expected_frames_per_update = 1;
-  f32 target_seconds_per_frame = (f32)expected_frames_per_update / (f32)game_update_hz;
-
   while (g_running)
   {
     // Process Input
-
-    // TODO: We can't zero everything because the up/down state will
-    // be wrong!!!
-    game_controller_input *old_keyboard_controller = get_controller(old_input, 0);
-    game_controller_input *new_keyboard_controller = get_controller(new_input, 0);
-    *new_keyboard_controller = {};
-    new_keyboard_controller->is_connected = true;
-    for(int button_index = 0;
-        button_index < ArrayCount(new_keyboard_controller->buttons);
-        ++button_index)
     {
-      new_keyboard_controller->buttons[button_index].ended_down =
-      old_keyboard_controller->buttons[button_index].ended_down;
-    }
-
-    win32_process_pending_messages(new_keyboard_controller);
-    
-    if (!g_pause)
-    {
-      // Get Mouse Position
+      game_controller_input *old_keyboard_controller = get_controller(old_input, 0);
+      game_controller_input *new_keyboard_controller = get_controller(new_input, 0);
+      *new_keyboard_controller = {};
+      new_keyboard_controller->is_connected = true;
+      for(int button_index = 0;
+          button_index < ArrayCount(new_keyboard_controller->buttons);
+          ++button_index)
       {
-          POINT mouse_p;
-          GetCursorPos(&mouse_p);
-          ScreenToClient(g_window_handle, &mouse_p);
-          new_input->mouse_x = (f32)mouse_p.x;
-          new_input->mouse_y = (f32)((g_client_height - 1) - mouse_p.y);  // TODO: backbuffer height (1080)
-          new_input->mouse_z = 0; // TODO: Support mousewheel?
-
-          new_input->shift_down = (GetKeyState(VK_SHIFT) & (1 << 15));
-          new_input->alt_down = (GetKeyState(VK_MENU) & (1 << 15));
-          new_input->control_down = (GetKeyState(VK_CONTROL) & (1 << 15));
+        new_keyboard_controller->buttons[button_index].ended_down =
+        old_keyboard_controller->buttons[button_index].ended_down;
       }
-
-      // Get Keyboard State
-      {
-        DWORD win_button_id[PlatformMouseButton_Count] =
-        {
-            VK_LBUTTON,
-            VK_MBUTTON,
-            VK_RBUTTON,
-            VK_XBUTTON1,
-            VK_XBUTTON2,
-        };
-        for(u32 button_index = 0;
-            button_index < PlatformMouseButton_Count;
-            ++button_index)
-        {
-            new_input->mouse_buttons[button_index] = old_input->mouse_buttons[button_index];
-            new_input->mouse_buttons[button_index].half_transition_count = 0;
-            win32_process_keyboard_message(&new_input->mouse_buttons[button_index],
-                GetKeyState(win_button_id[button_index]) & (1 << 15));
-        }
-      }
-
-      // Get Controller State
-      {
-        // TODO
-      }
-    }
-
-    // TODO: Update Game
-    if (!g_pause)
-    {
-      static u64 frame_count = 0;
-      static f64 total_time = 0.0;
-      
-      total_time += target_seconds_per_frame; //e.ElapsedTime;
-      frame_count++;
-
-      if (total_time > 1.0)
-      {
-          f64 fps = frame_count / total_time;
-
-          char buffer[512];
-          sprintf_s(buffer, "FPS: %f\n", fps);
-          OutputDebugStringA(buffer);
-
-          frame_count = 0;
-          total_time = 0.0;
-      }
-
-      // Update the model matrix.
-      f32 rotation = DirectX::XMConvertToRadians(static_cast<f32>(total_time * 90.0f));
-      object_constants.world_matrix = Matrix::CreateRotationY(rotation);
-    }
-
-    // TODO: Update Audio
-    if (!g_pause)
-    {
+      win32_process_pending_messages(new_keyboard_controller);
     }
 
     // Frame Display
@@ -318,11 +210,12 @@ int CALLBACK WinMain(
       dx12_graphics_ctx->clear_render_target(back_buffer, clear_color);
       dx12_graphics_ctx->clear_depth_stencil_target(depth_buffer);
 
+      static float rotation = 0.0f;
+      rotation += 0.0001f;
+
+      object_constants.world_matrix = Matrix::CreateRotationY(rotation);
       per_object_constant_buffers[g_dx12_state->get_frame_id()]->copy_data(&object_constants, sizeof(PerObjectConstants));
       per_object_resource_space.set_cbv(per_object_constant_buffers[g_dx12_state->get_frame_id()].get());
-
-      cube_pipeline->m_render_targets.clear();
-      cube_pipeline->m_render_targets.emplace_back(back_buffer);
 
       dx12_graphics_ctx->set_pipeline_state(cube_pipeline.get());
       dx12_graphics_ctx->set_pipeline_resources(DX12ResourceSpace::PerObjectSpace, &per_object_resource_space);
@@ -343,44 +236,14 @@ int CALLBACK WinMain(
     }
 
     // End Loop
-    flip_wall_clock = win32_get_wall_clock();
-
-    game_input *temp = new_input;
-    new_input = old_input;
-    old_input = temp;
-    // TODO: Should I clear these here?
-
-    LARGE_INTEGER end_counter = win32_get_wall_clock();
-    f32 measured_seconds_per_frame = win32_get_seconds_elapsed(last_counter, end_counter);
-    f32 exact_target_frames_per_update = measured_seconds_per_frame * (f32)monitor_refresh_hz;
-    u32 new_expected_frames_per_update = round_f32_to_s32(exact_target_frames_per_update);
-    expected_frames_per_update = new_expected_frames_per_update;
-
-    target_seconds_per_frame = measured_seconds_per_frame;
-
-    // FRAME_MARKER(measured_seconds_per_frame);
-    last_counter = end_counter;
+    {
+      game_input *temp = new_input;
+      new_input = old_input;
+      old_input = temp;
+    }
   }
 
   g_dx12_state->flush_queues();
-
-  g_dx12_state->destroy_texture_resource(move_ptr(dx12_texture_data->m_texture_resource));
-  g_dx12_state->destroy_buffer_resource(move_ptr(vertex_buffer));
-  g_dx12_state->destroy_buffer_resource(move_ptr(index_buffer));
-  g_dx12_state->destroy_buffer_resource(move_ptr(per_pass_constants_buffer));
-  g_dx12_state->destroy_pipeline_state(move_ptr(cube_pipeline));
-
-  for (u32 frame_index = 0; frame_index < k_num_frames_in_flight; frame_index++)
-  {
-      g_dx12_state->destroy_buffer_resource(move_ptr(per_object_constant_buffers[frame_index]));
-  }
-
-  // ImGui_ImplDX12_Shutdown();
-  // ImGui_ImplWin32_Shutdown();
-
-  g_dx12_state->destroy_context(move_ptr(dx12_graphics_ctx));
-
-  g_dx12_state = nullptr;
 
   return 0;
 }

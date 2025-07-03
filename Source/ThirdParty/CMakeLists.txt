@@ -1,1 +1,3 @@
-add_subdirectory(D3D12Headers)
+add_subdirectory(DirectX-Headers)
+add_subdirectory(stb)
+add_subdirectory(SimpleMath)

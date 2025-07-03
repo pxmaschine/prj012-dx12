@@ -9,6 +9,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Project executable setup
 ##########################################################################################
 
+# Detect current config from CMAKE_CFG_INTDIR (multi-config generators like Visual Studio or Ninja Multi-Config)
+if(CMAKE_CONFIGURATION_TYPES)
+    set(CONFIG_DIR "$<CONFIG>")
+else()
+    set(CONFIG_DIR "${CMAKE_BUILD_TYPE}")
+endif()
+
 add_subdirectory(Assets)
 add_subdirectory(Source)
 
@@ -60,6 +67,8 @@ endif()
 ##########################################################################################
 target_link_libraries(${PROJECT_NAME} PRIVATE
   d3d12headers
+  stb
+  simplemath
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE

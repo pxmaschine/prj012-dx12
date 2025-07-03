@@ -198,9 +198,9 @@ static LRESULT CALLBACK win32_main_window_callback(
           int width = client_rect.right - client_rect.left;
           int height = client_rect.bottom - client_rect.top;
 
-          if (win32_resize(width, height))
+          if (win32_resize(width, height) && g_dx12_state)
           {
-              dx12_resize(width, height);
+            g_dx12_state->resize(width, height);
           }
           break;
         }
