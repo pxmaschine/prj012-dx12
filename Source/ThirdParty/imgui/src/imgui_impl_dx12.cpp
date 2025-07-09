@@ -101,6 +101,9 @@ struct ImGui_ImplDX12_Data
 
     ImGui_ImplDX12_Texture      FontTexture;
     bool                        LegacySingleDescriptorUsed;
+    // NOTE: custommodifications
+    D3D12_CPU_DESCRIPTOR_HANDLE hFontSrvCpuDescHandles[2] = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE hFontSrvGpuDescHandles[2] = {};
 
     ImGui_ImplDX12_Data()       { memset((void*)this, 0, sizeof(*this)); frameIndex = UINT_MAX; }
 };
@@ -324,7 +327,8 @@ void ImGui_ImplDX12_RenderDrawData(ImDrawData* draw_data, ID3D12GraphicsCommandL
 
                 // Bind texture, Draw
                 D3D12_GPU_DESCRIPTOR_HANDLE texture_handle = {};
-                texture_handle.ptr = (UINT64)pcmd->GetTexID();
+                // NOTE: custom modifications
+                texture_handle.ptr = bd->hFontSrvGpuDescHandles[(bd->frameIndex + 1) % bd->numFramesInFlight].ptr; //(UINT64)pcmd->GetTexID();
                 command_list->SetGraphicsRootDescriptorTable(1, texture_handle);
                 command_list->DrawIndexedInstanced(pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
             }
@@ -340,12 +344,16 @@ static void ImGui_ImplDX12_DestroyTexture(ImTextureData* tex)
     ImGui_ImplDX12_Texture* backend_tex = (ImGui_ImplDX12_Texture*)tex->BackendUserData;
     if (backend_tex == nullptr)
         return;
-    IM_ASSERT(backend_tex->hFontSrvGpuDescHandle.ptr == (UINT64)tex->TexID);
+    // NOTE: custom modifications
     ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
-    bd->InitInfo.SrvDescriptorFreeFn(&bd->InitInfo, backend_tex->hFontSrvCpuDescHandle, backend_tex->hFontSrvGpuDescHandle);
+    // NOTE: custom modifications
+    IM_ASSERT(bd->hFontSrvGpuDescHandles[0].ptr == (UINT64)tex->TexID);
+    // NOTE: custom modifications
+    bd->InitInfo.SrvDescriptorFreeFn(&bd->InitInfo, bd->hFontSrvCpuDescHandles[0], bd->hFontSrvGpuDescHandles[0], bd->hFontSrvCpuDescHandles[1], bd->hFontSrvGpuDescHandles[1]);
     SafeRelease(backend_tex->pTextureResource);
-    backend_tex->hFontSrvCpuDescHandle.ptr = 0;
-    backend_tex->hFontSrvGpuDescHandle.ptr = 0;
+    // NOTE: custom modifications
+    // backend_tex->hFontSrvCpuDescHandle.ptr = 0;
+    // backend_tex->hFontSrvGpuDescHandle.ptr = 0;
     IM_DELETE(backend_tex);
 
     // Clear identifiers and mark as destroyed (in order to allow e.g. calling InvalidateDeviceObjects while running)
@@ -366,7 +374,8 @@ void ImGui_ImplDX12_UpdateTexture(ImTextureData* tex)
         IM_ASSERT(tex->TexID == ImTextureID_Invalid && tex->BackendUserData == nullptr);
         IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
         ImGui_ImplDX12_Texture* backend_tex = IM_NEW(ImGui_ImplDX12_Texture)();
-        bd->InitInfo.SrvDescriptorAllocFn(&bd->InitInfo, &backend_tex->hFontSrvCpuDescHandle, &backend_tex->hFontSrvGpuDescHandle); // Allocate a desctriptor handle
+        // NOTE: custom modifications
+        bd->InitInfo.SrvDescriptorAllocFn(&bd->InitInfo, &bd->hFontSrvCpuDescHandles[0], &bd->hFontSrvGpuDescHandles[0], &bd->hFontSrvCpuDescHandles[1], &bd->hFontSrvGpuDescHandles[1]); // Allocate a desctriptor handle
 
         D3D12_HEAP_PROPERTIES props = {};
         props.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -399,12 +408,15 @@ void ImGui_ImplDX12_UpdateTexture(ImTextureData* tex)
         srvDesc.Texture2D.MipLevels = desc.MipLevels;
         srvDesc.Texture2D.MostDetailedMip = 0;
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        bd->pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, backend_tex->hFontSrvCpuDescHandle);
+        // NOTE: custom modifications
+        bd->pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, bd->hFontSrvCpuDescHandles[0]);
+        bd->pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, bd->hFontSrvCpuDescHandles[1]);
         SafeRelease(backend_tex->pTextureResource);
         backend_tex->pTextureResource = pTexture;
 
         // Store identifiers
-        tex->SetTexID((ImTextureID)backend_tex->hFontSrvGpuDescHandle.ptr);
+        // NOTE: custom modifications
+        tex->SetTexID((ImTextureID)bd->hFontSrvGpuDescHandles[0].ptr);
         tex->BackendUserData = backend_tex;
         need_barrier_before_copy = false; // Because this is a newly-created texture it will be in D3D12_RESOURCE_STATE_COMMON and thus we don't need a barrier
         // We don't set tex->Status to ImTextureStatus_OK to let the code fallthrough below.
@@ -810,16 +822,22 @@ void    ImGui_ImplDX12_InvalidateDeviceObjects()
 static void ImGui_ImplDX12_InitLegacySingleDescriptorMode(ImGui_ImplDX12_InitInfo* init_info)
 {
     // Wrap legacy behavior of passing space for a single descriptor
-    IM_ASSERT(init_info->LegacySingleSrvCpuDescriptor.ptr != 0 && init_info->LegacySingleSrvGpuDescriptor.ptr != 0);
-    init_info->SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle)
+    // NOTE: custom modifications
+    IM_ASSERT(init_info->LegacySingleSrvCpuDescriptor.ptr != 0 && init_info->LegacySingleSrvGpuDescriptor.ptr != 0 && init_info->LegacySingleSrvCpuDescriptor2.ptr != 0 && init_info->LegacySingleSrvGpuDescriptor2.ptr != 0);
+    // NOTE: custom modifications
+    init_info->SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle2, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle2)
     {
         ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
         IM_ASSERT(bd->LegacySingleDescriptorUsed == false && "Only 1 simultaneous texture allowed with legacy ImGui_ImplDX12_Init() signature!");
         *out_cpu_handle = bd->InitInfo.LegacySingleSrvCpuDescriptor;
         *out_gpu_handle = bd->InitInfo.LegacySingleSrvGpuDescriptor;
+        // NOTE: custom modifications
+        *out_cpu_handle2 = bd->InitInfo.LegacySingleSrvCpuDescriptor2;
+        *out_gpu_handle2 = bd->InitInfo.LegacySingleSrvGpuDescriptor2;
         bd->LegacySingleDescriptorUsed = true;
     };
-    init_info->SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE)
+    // NOTE: custom modifications
+    init_info->SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE)
     {
         ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
         IM_ASSERT(bd->LegacySingleDescriptorUsed == true);
@@ -876,7 +894,8 @@ bool ImGui_ImplDX12_Init(ImGui_ImplDX12_InitInfo* init_info)
 #ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
 // Legacy initialization API Obsoleted in 1.91.5
 // font_srv_cpu_desc_handle and font_srv_gpu_desc_handle are handles to a single SRV descriptor to use for the internal font texture, they must be in 'srv_descriptor_heap'
-bool ImGui_ImplDX12_Init(ID3D12Device* device, int num_frames_in_flight, DXGI_FORMAT rtv_format, ID3D12DescriptorHeap* srv_descriptor_heap, D3D12_CPU_DESCRIPTOR_HANDLE font_srv_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE font_srv_gpu_desc_handle)
+// NOTE: custom modifications
+bool ImGui_ImplDX12_Init(ID3D12Device* device, int num_frames_in_flight, DXGI_FORMAT rtv_format, ID3D12DescriptorHeap* srv_descriptor_heap, D3D12_CPU_DESCRIPTOR_HANDLE font_srv_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE font_srv_gpu_desc_handle, D3D12_CPU_DESCRIPTOR_HANDLE font_srv_cpu_desc_handle2, D3D12_GPU_DESCRIPTOR_HANDLE font_srv_gpu_desc_handle2)
 {
     ImGui_ImplDX12_InitInfo init_info;
     init_info.Device = device;
@@ -885,6 +904,9 @@ bool ImGui_ImplDX12_Init(ID3D12Device* device, int num_frames_in_flight, DXGI_FO
     init_info.SrvDescriptorHeap = srv_descriptor_heap;
     init_info.LegacySingleSrvCpuDescriptor = font_srv_cpu_desc_handle;
     init_info.LegacySingleSrvGpuDescriptor = font_srv_gpu_desc_handle;
+    // NOTE: custom modifications
+    init_info.LegacySingleSrvCpuDescriptor2 = font_srv_cpu_desc_handle2;
+    init_info.LegacySingleSrvGpuDescriptor2 = font_srv_gpu_desc_handle2;
 
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
