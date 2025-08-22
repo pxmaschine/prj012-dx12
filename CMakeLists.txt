@@ -69,6 +69,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   d3d12headers
   stb
   simplemath
+  fmt
+  imgui
+  cgltf
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -76,6 +79,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   dxgi.lib
   dxguid.lib
   D3DCompiler.lib
+  Shlwapi.lib
 )
 
 # target_link_libraries(${PROJECT_NAME} PRIVATE

@@ -3,24 +3,21 @@
 #include <dxgidebug.h>
 #include <d3dcompiler.h>
 
-#include <Defines.h>
-#include <MathUtility.h>
+#include <MathLib.h>
 #include <Platform/PlatformContext.h>
 
+#include <Asset.h>
 
 //---------------------
 //  Helper Functions
 //---------------------
 namespace 
 {
-  // TODO: Remove this
-  // From DXSampleHelper.h
-  // Source: https://github.com/Microsoft/DirectX-Graphics-Samples
-  inline void throw_if_failed(HRESULT hr)
+  inline void check_hresult(HRESULT hr)
   {
     if (FAILED(hr))
     {
-      throw std::exception();
+      zv_fatal("Invalid HRESULT: {}", hr);
     }
   }
 
@@ -52,17 +49,38 @@ namespace
     return allow_tearing == TRUE;
   }
 
+  inline UINT check_msaa_quality_level(ID3D12Device* device, DXGI_FORMAT format, UINT sample_count)
+  {
+    // Check 4X MSAA quality support for our back buffer format.
+    // All Direct3D 11 capable devices support 4X MSAA for all render 
+    // target formats, so we only need to check quality support.
+
+    D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS ms_quality_levels;
+    ms_quality_levels.Format = format;
+    ms_quality_levels.SampleCount = sample_count;
+    ms_quality_levels.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
+    ms_quality_levels.NumQualityLevels = 0;
+    check_hresult(device->CheckFeatureSupport(
+      D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
+      &ms_quality_levels,
+      sizeof(ms_quality_levels)));
+
+    UINT msaa_quality_level = ms_quality_levels.NumQualityLevels;
+    zv_assert_msg(msaa_quality_level > 0, "Unexpected MSAA quality level.");
+
+    return msaa_quality_level;
+  }
+
   inline IDXGIAdapter4* get_adapter()
   {
     IDXGIFactory4* dxgi_factory;
     UINT create_factory_flags = 0;
 
-  #if defined(_DEBUG)
+  #if defined(ZV_DEBUG)
     create_factory_flags = DXGI_CREATE_FACTORY_DEBUG;
   #endif
 
-    // TODO: Replace with error handling
-    throw_if_failed(CreateDXGIFactory2(create_factory_flags, IID_PPV_ARGS(&dxgi_factory)));
+    check_hresult(CreateDXGIFactory2(create_factory_flags, IID_PPV_ARGS(&dxgi_factory)));
 
     IDXGIAdapter1* dxgi_adapter1{};
     IDXGIAdapter4* dxgi_adapter4{};
@@ -84,8 +102,7 @@ namespace
         max_dedicated_video_memory = dxgi_adapter_desc1.DedicatedVideoMemory;
         
         safe_release_com_ptr(dxgi_adapter4);
-        // TODO: Replace with error handling
-        throw_if_failed(dxgi_adapter1->QueryInterface(__uuidof(IDXGIAdapter4), (void**)&dxgi_adapter4));
+        check_hresult(dxgi_adapter1->QueryInterface(__uuidof(IDXGIAdapter4), (void**)&dxgi_adapter4));
       }
 
       safe_release_com_ptr(dxgi_adapter1);
@@ -99,11 +116,10 @@ namespace
   inline ID3D12Device5* create_device(IDXGIAdapter4* adapter)
   {
     ID3D12Device5* d3d12_device;
-    // TODO: Replace with error handling
-    throw_if_failed(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&d3d12_device)));
+    check_hresult(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&d3d12_device)));
 
     // Enable debug messages in debug mode.
-#if defined(_DEBUG)
+#if defined(ZV_DEBUG)
     ID3D12InfoQueue* info_queue;
     if (SUCCEEDED(d3d12_device->QueryInterface(__uuidof(ID3D12InfoQueue), (void**)&info_queue)))
     {
@@ -133,8 +149,7 @@ namespace
       new_filter.DenyList.NumIDs = _countof(DenyIds);
       new_filter.DenyList.pIDList = DenyIds;
 
-      // TODO: Replace with error handling
-      throw_if_failed(info_queue->PushStorageFilter(&new_filter));
+      check_hresult(info_queue->PushStorageFilter(&new_filter));
 
       safe_release_com_ptr(info_queue);
     }
@@ -154,19 +169,19 @@ namespace
     IDXGIFactory4* dxgi_factory4;
     UINT create_factory_flags = 0;
 
-#if defined(_DEBUG)
+#if defined(ZV_DEBUG)
     create_factory_flags = DXGI_CREATE_FACTORY_DEBUG;
 #endif
 
-    // TODO: Replace with error handling
-    throw_if_failed(CreateDXGIFactory2(create_factory_flags, IID_PPV_ARGS(&dxgi_factory4)));
+    check_hresult(CreateDXGIFactory2(create_factory_flags, IID_PPV_ARGS(&dxgi_factory4)));
 
     DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
     swap_chain_desc.Width = width;
     swap_chain_desc.Height = height;
     swap_chain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     swap_chain_desc.Stereo = FALSE;
-    swap_chain_desc.SampleDesc = {1, 0};
+    swap_chain_desc.SampleDesc.Count = 1;
+    swap_chain_desc.SampleDesc.Quality = 0;
     swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swap_chain_desc.BufferCount = buffer_count;
     swap_chain_desc.Scaling = DXGI_SCALING_STRETCH;
@@ -176,8 +191,7 @@ namespace
     swap_chain_desc.Flags = is_tearing_supported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
     IDXGISwapChain1* swap_chain_1;
-    // TODO: Replace with error handling
-    throw_if_failed(dxgi_factory4->CreateSwapChainForHwnd(
+    check_hresult(dxgi_factory4->CreateSwapChainForHwnd(
         command_queue,
         window,
         &swap_chain_desc,
@@ -187,11 +201,9 @@ namespace
 
     // Disable the Alt+Enter fullscreen toggle feature. Switching to fullscreen
     // will be handled manually.
-    // TODO: Replace with error handling
-    throw_if_failed(dxgi_factory4->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER));
+    check_hresult(dxgi_factory4->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER));
 
-    // TODO: Replace with error handling
-    throw_if_failed(swap_chain_1->QueryInterface(__uuidof(IDXGISwapChain4), (void**)&dxgi_swap_chain4));
+    check_hresult(swap_chain_1->QueryInterface(__uuidof(IDXGISwapChain4), (void**)&dxgi_swap_chain4));
 
     safe_release_com_ptr(swap_chain_1);
     safe_release_com_ptr(dxgi_factory4);
@@ -204,11 +216,12 @@ namespace
 //  DX12State Implementation
 //-------------------------------
 
-DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync)
+DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync, bool msaa_enabled)
   : m_vsync(vsync)
   , m_frame_index(0)
+  , m_msaa_enabled(msaa_enabled)
 {
-#if defined(_DEBUG)
+#if defined(ZV_DEBUG)
   // Always enable the debug layer before doing anything DX12 related
   // so all possible errors generated while creating DX12 objects
   // are caught by the debug layer.
@@ -238,7 +251,10 @@ DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bo
   for (u32 i = 0; i < k_num_frames_in_flight; ++i)
   {
     m_srv_render_pass_descriptor_heaps[i] = make_unique_ptr<DX12RenderPassDescriptorHeap>(m_device.get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, k_num_reserved_srv_descriptors, k_num_srv_render_pass_user_descriptors);
+    m_imgui_descriptors[i] = m_srv_render_pass_descriptor_heaps[i]->get_reserved_descriptor(k_imgui_reserved_descriptor_index);
   }
+
+  m_msaa_quality_level = check_msaa_quality_level(m_device.get(), DXGI_FORMAT_R8G8B8A8_UNORM, m_msaa_enabled ? 4 : 1);
 
   // Create DSV heap
   D3D12_DESCRIPTOR_HEAP_DESC dsv_heap_desc = {};
@@ -263,13 +279,16 @@ DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bo
     m_upload_contexts[frameIndex] = make_unique_ptr<DX12UploadCommandContext>(this);
   }
 
-  // //The -1 and starting at index 1 accounts for the imgui descriptor.
-  // mFreeReservedDescriptorIndices.resize(NUM_RESERVED_SRV_DESCRIPTORS - 1);
-  // std::iota(mFreeReservedDescriptorIndices.begin(), mFreeReservedDescriptorIndices.end(), 1);
-  m_free_reserved_descriptor_indices.resize(k_num_reserved_srv_descriptors);
-  fill_sequential(m_free_reserved_descriptor_indices.begin(), m_free_reserved_descriptor_indices.end(), 0);
+  // The -1 and starting at index 1 accounts for the imgui descriptor.
+  m_free_reserved_descriptor_indices.resize(k_num_reserved_srv_descriptors - 1);
+  fill_sequential(m_free_reserved_descriptor_indices.begin(), m_free_reserved_descriptor_indices.end(), 1);
 
   create_depth_stencil_buffer(client_width, client_height);
+
+  if (m_msaa_enabled)
+  {
+    create_msaa_render_target(client_width, client_height);
+  }
 }
 
 DX12State::~DX12State()
@@ -283,7 +302,15 @@ DX12State::~DX12State()
     m_back_buffers[buffer_index] = nullptr;
   }
 
-  m_depth_stencil_buffer.reset();
+  if (m_depth_stencil_buffer)
+  {
+    destroy_texture_resource(move_ptr(m_depth_stencil_buffer));
+  }
+
+  if (m_msaa_render_target)
+  {
+    destroy_texture_resource(move_ptr(m_msaa_render_target));
+  }
 
   m_swap_chain.reset();
 
@@ -318,7 +345,7 @@ DX12State::~DX12State()
 
   m_device.reset();
 
-#ifdef _DEBUG
+#ifdef ZV_DEBUG
   IDXGIDebug1* debug_interface = nullptr;
   if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug_interface))))
   {
@@ -347,8 +374,7 @@ void DX12State::update_render_target_views()
     rtv_desc.Texture2D.MipSlice = 0;
     rtv_desc.Texture2D.PlaneSlice = 0;
 
-    // TODO: error
-    throw_if_failed(m_swap_chain->GetBuffer(i, IID_PPV_ARGS(&back_buffer)));
+    check_hresult(m_swap_chain->GetBuffer(i, IID_PPV_ARGS(&back_buffer)));
     m_device->CreateRenderTargetView(back_buffer, &rtv_desc, back_buffer_rtv_handle.m_cpu_handle);
 
     m_back_buffers[i] = make_unique_ptr<DX12TextureResource>();
@@ -385,8 +411,7 @@ void DX12State::present()
   UINT sync_interval = m_vsync ? 1 : 0;
   UINT present_flags = (m_tearing_supported && !m_vsync) ? DXGI_PRESENT_ALLOW_TEARING : 0;
   
-  // TODO: error
-  throw_if_failed(m_swap_chain->Present(sync_interval, present_flags));
+  check_hresult(m_swap_chain->Present(sync_interval, present_flags));
 
   m_frame_fence_values[m_frame_index].m_graphics_queue_fence = m_graphics_queue->signal_fence();
 }
@@ -411,24 +436,58 @@ void DX12State::resize(u32 width, u32 height)
   height = ZV::max(height, 1u);
 
   // Resize swap chain
-  throw_if_failed(m_swap_chain->ResizeBuffers(
+  check_hresult(m_swap_chain->ResizeBuffers(
     k_num_back_buffers, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 
     m_tearing_supported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0));
   
   update_render_target_views();
   create_depth_stencil_buffer(width, height);
+  if (m_msaa_enabled)
+  {
+    create_msaa_render_target(width, height);
+  }
 }
 
 void DX12State::create_depth_stencil_buffer(u32 width, u32 height)
 {
+  if (m_depth_stencil_buffer)
+  {
+    destroy_texture_resource(move_ptr(m_depth_stencil_buffer));
+  }
+
   DX12TextureResource::Desc depth_buffer_desc;
   depth_buffer_desc.m_format = DXGI_FORMAT_D32_FLOAT;
   depth_buffer_desc.m_width = width;
   depth_buffer_desc.m_height = height;
   depth_buffer_desc.m_view_flags.set(DX12TextureViewFlags::SRV);
   depth_buffer_desc.m_view_flags.set(DX12TextureViewFlags::DSV);
+  depth_buffer_desc.m_sample_desc.Count = m_msaa_enabled ? 4 : 1;
+  depth_buffer_desc.m_sample_desc.Quality = m_msaa_enabled ? m_msaa_quality_level - 1 : 0;
+  depth_buffer_desc.m_is_msaa_enabled = m_msaa_enabled;
+  depth_buffer_desc.m_flags = m_msaa_enabled ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_NONE;
 
   m_depth_stencil_buffer = create_texture_resource(depth_buffer_desc);
+}
+
+void DX12State::create_msaa_render_target(u32 width, u32 height)
+{
+  if (m_msaa_render_target)
+  {
+    destroy_texture_resource(move_ptr(m_msaa_render_target));
+  }
+
+  DX12TextureResource::Desc msaa_render_target_desc;
+  msaa_render_target_desc.m_format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+  msaa_render_target_desc.m_width = width;
+  msaa_render_target_desc.m_height = height;
+  msaa_render_target_desc.m_view_flags.set(DX12TextureViewFlags::SRV);
+  msaa_render_target_desc.m_view_flags.set(DX12TextureViewFlags::RTV);
+  msaa_render_target_desc.m_sample_desc.Count = 4;
+  msaa_render_target_desc.m_sample_desc.Quality = m_msaa_quality_level - 1;
+  msaa_render_target_desc.m_is_msaa_enabled = true;
+  msaa_render_target_desc.m_flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+  m_msaa_render_target = create_texture_resource(msaa_render_target_desc);
 }
 
 UniquePtr<DX12PipelineState> DX12State::create_graphics_pipeline(const DX12PipelineState::Desc& desc)
@@ -442,10 +501,8 @@ UniquePtr<DX12PipelineState> DX12State::create_graphics_pipeline(const DX12Pipel
   // Load shaders (you'll need to compile these first)
   ID3DBlob* vs_blob;
   ID3DBlob* ps_blob;
-  // TODO: Error
-  throw_if_failed(D3DReadFileToBlob(desc.m_vs_path, &vs_blob));
-  // TODO: Error
-  throw_if_failed(D3DReadFileToBlob(desc.m_ps_path, &ps_blob));
+  check_hresult(D3DReadFileToBlob(desc.m_vs_path, &vs_blob));
+  check_hresult(D3DReadFileToBlob(desc.m_ps_path, &ps_blob));
 
   // Pipeline state desc
   D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc{};
@@ -480,8 +537,7 @@ UniquePtr<DX12PipelineState> DX12State::create_graphics_pipeline(const DX12Pipel
   }
 
   ID3D12PipelineState* pso;
-  // TODO: Error
-  throw_if_failed(m_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&pso)));
+  check_hresult(m_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&pso)));
 
   new_pipeline->m_pso.reset(pso);
 
@@ -516,11 +572,19 @@ UniquePtr<DX12BufferResource> DX12State::create_buffer_resource(const DX12Buffer
     resource_state = D3D12_RESOURCE_STATE_GENERIC_READ;
   }
 
+  if (desc.m_buffer_type == DX12BufferResource::Desc::BufferType::VertexBuffer)
+  {
+    resource_state = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+  }
+  else if (desc.m_buffer_type == DX12BufferResource::Desc::BufferType::IndexBuffer)
+  {
+    resource_state = D3D12_RESOURCE_STATE_INDEX_BUFFER;
+  }
+
   D3D12_HEAP_FLAGS heap_flag = D3D12_HEAP_FLAG_NONE;
 
   ID3D12Resource* resource;
-  // TODO: Error
-  throw_if_failed(m_device->CreateCommittedResource(
+  check_hresult(m_device->CreateCommittedResource(
     &heap_props,
     heap_flag,
     &resource_desc,
@@ -647,8 +711,7 @@ UniquePtr<DX12TextureResource> DX12State::create_texture_resource(const DX12Text
     }
     default:
     {
-      // TODO: Error
-      // AssertError("Bad depth stencil format.");
+      zv_fatal("Bad depth stencil format.");
       break;
     }
     }
@@ -681,8 +744,7 @@ UniquePtr<DX12TextureResource> DX12State::create_texture_resource(const DX12Text
   CD3DX12_HEAP_PROPERTIES heap_props(heap_type);
 
   ID3D12Resource *resource;
-  // TODO: Error
-  throw_if_failed(m_device->CreateCommittedResource(
+  check_hresult(m_device->CreateCommittedResource(
       &heap_props,
       D3D12_HEAP_FLAG_NONE,
       &texture_desc,
@@ -704,7 +766,7 @@ UniquePtr<DX12TextureResource> DX12State::create_texture_resource(const DX12Text
       srv_desc.Texture2D.MostDetailedMip = 0;
       srv_desc.Texture2D.PlaneSlice = 0;
       srv_desc.Texture2D.ResourceMinLODClamp = 0.0f;
-      srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      srv_desc.ViewDimension = desc.m_is_msaa_enabled ? D3D12_SRV_DIMENSION_TEXTURE2DMS : D3D12_SRV_DIMENSION_TEXTURE2D;
 
       m_device->CreateShaderResourceView(texture->m_resource.get(), &srv_desc, texture->m_srv_descriptor.m_cpu_handle);
     }
@@ -745,7 +807,7 @@ UniquePtr<DX12TextureResource> DX12State::create_texture_resource(const DX12Text
     dsv_desc.Flags = D3D12_DSV_FLAG_NONE;
     dsv_desc.Format = desc.m_format;
     dsv_desc.Texture2D.MipSlice = 0;
-    dsv_desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsv_desc.ViewDimension = desc.m_is_msaa_enabled ? D3D12_DSV_DIMENSION_TEXTURE2DMS : D3D12_DSV_DIMENSION_TEXTURE2D;
 
     texture->m_dsv_descriptor = m_dsv_staging_descriptor_heap->create_descriptor();
     m_device->CreateDepthStencilView(texture->m_resource.get(), &dsv_desc, texture->m_dsv_descriptor.m_cpu_handle);
@@ -884,31 +946,44 @@ void DX12State::process_destructions(u32 frame_index)
   destruction_queue.m_contexts_to_destroy.clear();
 }
 
-UniquePtr<DX12TextureData> DX12State::create_texture_data(const RawTextureData& raw_texture_data)
+UniquePtr<DX12TextureData> DX12State::create_texture_data(TextureAsset* texture_asset)
 {
-  bool is_3d_texture = raw_texture_data.m_dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+  D3D12_RESOURCE_DIMENSION dimension = static_cast<D3D12_RESOURCE_DIMENSION>(texture_asset->m_dimension);
+  bool is_3d_texture = dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D;
   DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
 
-  if (raw_texture_data.m_num_channels == 1)
+  if (texture_asset->m_format == TextureFormat::Linear)
   {
-    format = DXGI_FORMAT_R8_UNORM;
+    if (texture_asset->m_num_channels == 1)
+    {
+      format = DXGI_FORMAT_R8_UNORM;
+    }
+    else if (texture_asset->m_num_channels == 2)
+    {
+      format = DXGI_FORMAT_R8G8_UNORM;
+    }
+    else if (texture_asset->m_num_channels >= 3)
+    {
+      format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+    else
+    {
+      zv_assert_msg(false, "Invalid number of channels");
+    }
   }
-  else if (raw_texture_data.m_num_channels == 2)
+  else
   {
-    format = DXGI_FORMAT_R8G8_UNORM;
-  }
-  else if (raw_texture_data.m_num_channels >= 3)
-  {
+    zv_assert_msg(texture_asset->m_num_channels >= 3, "SRGB texture requires at least 3 channels");
     format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
   }
 
   DX12TextureResource::Desc desc;
   desc.m_format = format;
-  desc.m_width = raw_texture_data.m_width;
-  desc.m_height = raw_texture_data.m_height;
+  desc.m_width = texture_asset->m_width;
+  desc.m_height = texture_asset->m_height;
   desc.m_flags = D3D12_RESOURCE_FLAG_NONE;
-  desc.m_depth_or_array_size = static_cast<UINT16>(is_3d_texture ? raw_texture_data.m_depth : raw_texture_data.m_array_size);
-  desc.m_mip_levels = static_cast<UINT16>(raw_texture_data.m_mip_levels);
+  desc.m_depth_or_array_size = static_cast<UINT16>(is_3d_texture ? texture_asset->m_depth : texture_asset->m_array_size);
+  desc.m_mip_levels = static_cast<UINT16>(texture_asset->m_mip_levels);
   desc.m_sample_desc.Count = 1;
   desc.m_sample_desc.Quality = 0;
   desc.m_dimension = is_3d_texture ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -970,8 +1045,8 @@ UniquePtr<DX12TextureData> DX12State::create_texture_data(const RawTextureData& 
       // In a full implementation, you'd need to calculate the source data for each mip level
       if (sub_resource_index == 0) // First/only subresource
       {
-        const u8* src_data = raw_texture_data.m_data;
-        const u32 src_pitch = raw_texture_data.m_width * raw_texture_data.m_num_channels;
+        const u8* src_data = texture_asset->m_data.get();
+        const u32 src_pitch = texture_asset->m_width * texture_asset->m_num_channels;
         
         for (u32 slice_index = 0; slice_index < sub_resource_depth; slice_index++)
         {
@@ -1137,19 +1212,16 @@ ID3D12RootSignature* DX12State::create_root_signature(
 
   ID3DBlob* root_signature_blob = nullptr;
   ID3DBlob* error_blob = nullptr;
-  // TODO: Error
   HRESULT hr = D3D12SerializeVersionedRootSignature(&root_signature_desc, &root_signature_blob, &error_blob);
 
   if (error_blob != nullptr)
   {
-    // TODO: Error
-    // ::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+    zv_error("Failed to serialize root signature: {}", (char*)error_blob->GetBufferPointer());
   }
-  throw_if_failed(hr);
+  check_hresult(hr);
 
   ID3D12RootSignature* root_signature = nullptr;
-  // TODO: Error
-  throw_if_failed(m_device->CreateRootSignature(0, root_signature_blob->GetBufferPointer(), root_signature_blob->GetBufferSize(), IID_PPV_ARGS(&root_signature)));
+  check_hresult(m_device->CreateRootSignature(0, root_signature_blob->GetBufferPointer(), root_signature_blob->GetBufferSize(), IID_PPV_ARGS(&root_signature)));
 
   return root_signature;
 }
@@ -1167,20 +1239,15 @@ DX12CommandQueue::DX12CommandQueue(ID3D12Device* device, D3D12_COMMAND_LIST_TYPE
   desc.NodeMask = 0;
 
   ID3D12CommandQueue* queue;
-  // TODO: error
-  throw_if_failed(device->CreateCommandQueue(&desc, IID_PPV_ARGS(&queue)));
+  check_hresult(device->CreateCommandQueue(&desc, IID_PPV_ARGS(&queue)));
   m_queue.reset(queue);
 
   ID3D12Fence* fence;
-  // TODO: error
-  throw_if_failed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+  check_hresult(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
   m_fence.reset(fence);
 
   m_fence_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-  if (!m_fence_event)
-  {
-    throw std::exception(); // TODO: Better error handling
-  }
+  zv_assert(m_fence_event);
 }
 
 DX12CommandQueue::~DX12CommandQueue()
@@ -1219,8 +1286,7 @@ void DX12CommandQueue::wait_for_fence_value(u64 fence_value)
   {
     ScopedLock lock_guard(m_event_mutex);
 
-    // TODO: Error
-    throw_if_failed(m_fence->SetEventOnCompletion(fence_value, m_fence_event));
+    check_hresult(m_fence->SetEventOnCompletion(fence_value, m_fence_event));
     WaitForSingleObjectEx(m_fence_event, INFINITE, false);
     m_last_completed_fence_value = fence_value;
   }
@@ -1234,8 +1300,7 @@ u64 DX12CommandQueue::poll_current_fence_value()
 
 u64 DX12CommandQueue::execute_command_list(ID3D12GraphicsCommandList* command_list)
 {
-  // TODO: Error
-  throw_if_failed(command_list->Close());
+  check_hresult(command_list->Close());
   
   ID3D12CommandList* command_lists[] = { command_list };
   m_queue->ExecuteCommandLists(1, command_lists);
@@ -1264,14 +1329,12 @@ DX12CommandContext::DX12CommandContext(DX12State* dx12_state, D3D12_COMMAND_LIST
   for (u32 i = 0; i < k_num_frames_in_flight; ++i)
   {
     ID3D12CommandAllocator* allocator;
-    // TODO: Error
-    throw_if_failed(m_dx12_state->get_device()->CreateCommandAllocator(type, IID_PPV_ARGS(&allocator)));
+    check_hresult(m_dx12_state->get_device()->CreateCommandAllocator(type, IID_PPV_ARGS(&allocator)));
     m_allocators[i].reset(allocator);
   }
 
   ID3D12GraphicsCommandList* command_list;
-  // TODO: Error
-  throw_if_failed(m_dx12_state->get_device()->CreateCommandList1(0, type, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&command_list)));
+  check_hresult(m_dx12_state->get_device()->CreateCommandList1(0, type, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&command_list)));
   m_command_list.reset(command_list);
 }
 
@@ -1283,10 +1346,8 @@ void DX12CommandContext::reset()
 {
   u32 frame_id = m_dx12_state->get_frame_id();
 
-  // TODO: Error
-  throw_if_failed(m_allocators[frame_id]->Reset());
-  // TODO: Error
-  throw_if_failed(m_command_list->Reset(m_allocators[frame_id].get(), nullptr));
+  check_hresult(m_allocators[frame_id]->Reset());
+  check_hresult(m_command_list->Reset(m_allocators[frame_id].get(), nullptr));
 
   if (m_type != D3D12_COMMAND_LIST_TYPE_COPY)
   {
@@ -1315,10 +1376,8 @@ void DX12CommandContext::add_barrier(DX12Resource* resource, D3D12_RESOURCE_STAT
     constexpr D3D12_RESOURCE_STATES k_valid_compute_context_states = (D3D12_RESOURCE_STATE_UNORDERED_ACCESS | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
                                                                       D3D12_RESOURCE_STATE_COPY_DEST | D3D12_RESOURCE_STATE_COPY_SOURCE);
 
-    // TODO: Error
-    throw_if_failed((old_state & k_valid_compute_context_states) == old_state);
-    // TODO: Error
-    throw_if_failed((new_state & k_valid_compute_context_states) == new_state);
+    check_hresult((old_state & k_valid_compute_context_states) == old_state);
+    check_hresult((new_state & k_valid_compute_context_states) == new_state);
   }
 
   if (old_state != new_state)
@@ -1397,27 +1456,31 @@ void DX12GraphicsCommandContext::clear_depth_stencil_target(DX12TextureResource*
   m_command_list->ClearDepthStencilView(target->m_dsv_descriptor.m_cpu_handle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, depth, stencil, 0, nullptr);
 }
 
-void DX12GraphicsCommandContext::set_pipeline_state(DX12PipelineState* pipeline_state)
+void DX12GraphicsCommandContext::set_pipeline(const DX12PipelineInfo& pipeline_info)
 {
-  m_current_pipeline = pipeline_state;
+  const bool pipeline_expected_bound_externally = !pipeline_info.m_pipeline; //imgui
 
-  m_command_list->SetPipelineState(pipeline_state->m_pso.get());
-  m_command_list->SetGraphicsRootSignature(pipeline_state->m_root_signature.get());
+  if (!pipeline_expected_bound_externally)
+  {
+    m_command_list->SetPipelineState(pipeline_info.m_pipeline->m_pso.get());
+    m_command_list->SetGraphicsRootSignature(pipeline_info.m_pipeline->m_root_signature.get());
+  }
+
+  m_current_pipeline = pipeline_info.m_pipeline;
 
   D3D12_CPU_DESCRIPTOR_HANDLE render_target_handles[D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
   D3D12_CPU_DESCRIPTOR_HANDLE depth_stencil_handle{ 0 };
 
-  size_t render_target_count = pipeline_state->m_render_targets.size();
+  size_t render_target_count = pipeline_info.m_render_targets.size();
 
   for (size_t target_index = 0; target_index < render_target_count; target_index++)
   {
-    render_target_handles[target_index] = pipeline_state->m_render_targets[target_index]->m_rtv_descriptor.m_cpu_handle;
+    render_target_handles[target_index] = pipeline_info.m_render_targets[target_index]->m_rtv_descriptor.m_cpu_handle;
   }
 
-  auto depth_buffer = m_dx12_state->get_depth_stencil_buffer();
-  if (depth_buffer)
+  if (pipeline_info.m_depth_stencil_target)
   {
-    depth_stencil_handle = depth_buffer->m_dsv_descriptor.m_cpu_handle;
+    depth_stencil_handle = pipeline_info.m_depth_stencil_target->m_dsv_descriptor.m_cpu_handle;
   }
 
   set_render_targets(static_cast<u32>(render_target_count), render_target_handles, depth_stencil_handle);
@@ -1425,9 +1488,8 @@ void DX12GraphicsCommandContext::set_pipeline_state(DX12PipelineState* pipeline_
 
 void DX12GraphicsCommandContext::set_pipeline_resources(u32 space, DX12PipelineResourceSpace* resources)
 {
-  // TODO: Error
-  // assert(m_current_pipeline);
-  // assert(resources->is_locked());
+  zv_assert(m_current_pipeline);
+  zv_assert(resources->is_locked());
 
   static const u32 k_max_handles_per_binding = 16;
   static const u32 k_single_descriptor_range_copy_array[k_max_handles_per_binding]{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ,1 };
@@ -1438,13 +1500,12 @@ void DX12GraphicsCommandContext::set_pipeline_resources(u32 space, DX12PipelineR
   const u32 num_table_handles = static_cast<u32>(uavs.size() + srvs.size());
   D3D12_CPU_DESCRIPTOR_HANDLE handles[k_max_handles_per_binding]{};
   u32 current_handle_index = 0;
-  // assert(num_table_handles <= k_max_handles_per_binding);
+  zv_assert(num_table_handles <= k_max_handles_per_binding);
 
-  if(cbv)
+  if (cbv)
   {
       auto cbv_mapping = m_current_pipeline->m_resource_mapping.m_cbv_mapping[space];
-      // TODO: Error
-      // assert(cbv_mapping.has_value());
+      // zv_assert(cbv_mapping.has_value());
 
       m_command_list->SetGraphicsRootConstantBufferView(cbv_mapping, cbv->m_gpu_address);
 
@@ -1495,8 +1556,7 @@ void DX12GraphicsCommandContext::set_pipeline_resources(u32 space, DX12PipelineR
   m_dx12_state->get_device()->CopyDescriptors(1, &block_start.m_cpu_handle, &num_table_handles, num_table_handles, handles, k_single_descriptor_range_copy_array, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
   auto table_mapping = m_current_pipeline->m_resource_mapping.m_table_mapping[space];
-  // TODO: Error
-  // assert(table_mapping.has_value());
+  // zv_assert(table_mapping.has_value());
 
   m_command_list->SetGraphicsRootDescriptorTable(table_mapping, block_start.m_gpu_handle);
 
@@ -1539,6 +1599,11 @@ void DX12GraphicsCommandContext::set_primitive_topology(D3D12_PRIMITIVE_TOPOLOGY
   m_command_list->IASetPrimitiveTopology(topology);
 }
 
+void DX12GraphicsCommandContext::resolve_msaa_render_target(DX12TextureResource* msaa_rt, DX12TextureResource* current_back_buffer)
+{
+  m_command_list->ResolveSubresource(current_back_buffer->m_resource.get(), 0, msaa_rt->m_resource.get(), 0, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
+}
+
 void DX12GraphicsCommandContext::draw_indexed(u32 index_count, u32 start_index, u32 base_vertex)
 {
   m_command_list->DrawIndexedInstanced(index_count, 1, start_index, base_vertex, 0);
@@ -1557,13 +1622,13 @@ DX12UploadCommandContext::DX12UploadCommandContext(DX12State *dx12_state)
     : DX12CommandContext(dx12_state, D3D12_COMMAND_LIST_TYPE_COPY)
 {
   DX12BufferResource::Desc buffer_upload_heap_desc{};
-  buffer_upload_heap_desc.m_size = Megabytes(10);
+  buffer_upload_heap_desc.m_size = k_buffer_upload_heap_size;
   buffer_upload_heap_desc.m_access = DX12ResourceAccess::HostWritable;
 
   m_buffer_upload_heap = move_ptr(m_dx12_state->create_buffer_resource(buffer_upload_heap_desc));
 
   DX12BufferResource::Desc texture_upload_heap_desc{};
-  texture_upload_heap_desc.m_size = Megabytes(40);
+  texture_upload_heap_desc.m_size = k_texture_upload_heap_size;
   texture_upload_heap_desc.m_access = DX12ResourceAccess::HostWritable;
 
   m_texture_upload_heap = move_ptr(m_dx12_state->create_buffer_resource(texture_upload_heap_desc));
@@ -1614,65 +1679,104 @@ void DX12UploadCommandContext::process_buffer_uploads()
     return;
   }
 
-  u64 current_offset = 0;
+  u64 buffer_upload_heap_offset = 0;
+  size_t processed = 0;
 
-  for (const auto &upload : m_pending_buffer_uploads)
+  for (; processed < m_pending_buffer_uploads.size(); ++processed)
   {
-    memcpy(m_buffer_upload_heap->m_mapped_data + current_offset, upload.m_data, upload.m_size);
+      const auto& current_upload = m_pending_buffer_uploads[processed];
 
-    m_command_list->CopyBufferRegion(
-        upload.m_dest_buffer, 0,
-        m_buffer_upload_heap->m_resource.get(), current_offset,
-        upload.m_size);
+      // Drop impossible uploads so they don't block forever
+      if (current_upload.m_size > m_buffer_upload_heap->m_size)
+      {
+        zv_warning(
+          "Single buffer upload ({} bytes) exceeds heap size ({}). Skipping.",
+          static_cast<unsigned long long>(current_upload.m_size),
+          static_cast<unsigned long long>(m_buffer_upload_heap->m_size)
+        );
+        continue;
+      }
 
-    current_offset += upload.m_size;
+      if ((buffer_upload_heap_offset + current_upload.m_size) > m_buffer_upload_heap->m_size)
+      {
+          zv_warning("Buffer upload heap is full. Pushing remaining uploads to next frame.");
+          break;
+      }
+
+      memcpy(m_buffer_upload_heap->m_mapped_data + buffer_upload_heap_offset, current_upload.m_data, current_upload.m_size);
+
+      m_command_list->CopyBufferRegion(
+          current_upload.m_dest_buffer, 0,
+          m_buffer_upload_heap->m_resource.get(), buffer_upload_heap_offset,
+          current_upload.m_size);
+
+      buffer_upload_heap_offset += current_upload.m_size;
   }
 
-  m_pending_buffer_uploads.clear();
+  m_pending_buffer_uploads.erase(m_pending_buffer_uploads.begin(), m_pending_buffer_uploads.begin() + processed);
 }
 
 void DX12UploadCommandContext::process_texture_uploads()
 {
-  if (m_pending_texture_uploads.empty())
-  {
-    return;
-  }
-
-  u64 texture_upload_heap_offset = 0;
-
-  for (u32 i = 0; i < m_pending_texture_uploads.size(); ++i)
-  {
-    TextureUpload& current_upload = m_pending_texture_uploads[i];
-
-    if ((texture_upload_heap_offset + current_upload.m_size) > m_texture_upload_heap->m_size)
+    if (m_pending_texture_uploads.empty())
     {
-        break;
+      return;
     }
 
-    memcpy(m_texture_upload_heap->m_mapped_data + texture_upload_heap_offset, current_upload.m_data, current_upload.m_size);
-    
-    // Copy texture region
-    for (u32 j = 0; j < current_upload.m_num_sub_resources; ++j)
+    u64 texture_upload_heap_offset = 0;
+    std::size_t processed = 0;
+
+    for (; processed < m_pending_texture_uploads.size(); ++processed)
     {
-      D3D12_TEXTURE_COPY_LOCATION dest_location = {};
-      dest_location.pResource = current_upload.m_dest_texture;
-      dest_location.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-      dest_location.SubresourceIndex = j;
+        TextureUpload& current_upload = m_pending_texture_uploads[processed];
 
-      D3D12_TEXTURE_COPY_LOCATION source_location = {};
-      source_location.pResource = m_texture_upload_heap->m_resource.get();
-      source_location.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-      source_location.PlacedFootprint = current_upload.m_sub_resource_layouts[j];
-      source_location.PlacedFootprint.Offset += texture_upload_heap_offset;
+        // Drop impossible uploads so they don't block forever
+        if (current_upload.m_size > m_texture_upload_heap->m_size)
+        {
+            zv_warning(
+                "Single texture upload ({} bytes) exceeds heap size ({}). Skipping.",
+                static_cast<unsigned long long>(current_upload.m_size),
+                static_cast<unsigned long long>(m_texture_upload_heap->m_size)
+            );
+            continue;
+        }
 
-      m_command_list->CopyTextureRegion(&dest_location, 0, 0, 0, &source_location, nullptr);
+        if ((texture_upload_heap_offset + current_upload.m_size) > m_texture_upload_heap->m_size)
+        {
+            zv_warning("Texture upload heap is full. Pushing remaining uploads to next frame.");
+            break;
+        }
+
+        memcpy(m_texture_upload_heap->m_mapped_data + texture_upload_heap_offset, current_upload.m_data, current_upload.m_size);
+
+        // Copy texture subresources
+        for (u32 j = 0; j < current_upload.m_num_sub_resources; ++j)
+        {
+            D3D12_TEXTURE_COPY_LOCATION dest_location = {};
+            dest_location.pResource = current_upload.m_dest_texture;
+            dest_location.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dest_location.SubresourceIndex = j;
+
+            D3D12_TEXTURE_COPY_LOCATION source_location = {};
+            source_location.pResource = m_texture_upload_heap->m_resource.get();
+            source_location.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            source_location.PlacedFootprint = current_upload.m_sub_resource_layouts[j];
+            source_location.PlacedFootprint.Offset += texture_upload_heap_offset;
+
+            m_command_list->CopyTextureRegion(&dest_location, 0, 0, 0, &source_location, nullptr);
+        }
+
+        texture_upload_heap_offset += current_upload.m_size;
+        texture_upload_heap_offset = align_u64(texture_upload_heap_offset, 512);
     }
 
-    texture_upload_heap_offset += current_upload.m_size;
-    texture_upload_heap_offset = align_u64(texture_upload_heap_offset, 512);
-  }
-
-  m_pending_texture_uploads.clear();
+    // Remove only uploads we handled (or explicitly skipped as too large)
+    if (processed > 0)
+    {
+        m_pending_texture_uploads.erase(
+            m_pending_texture_uploads.begin(),
+            m_pending_texture_uploads.begin() + static_cast<std::ptrdiff_t>(processed));
+    }
 }
 
 //-------------------------------
@@ -1689,8 +1793,7 @@ DX12DescriptorHeap::DX12DescriptorHeap(ID3D12Device *device, D3D12_DESCRIPTOR_HE
   heap_desc.NodeMask = 0;
 
   ID3D12DescriptorHeap* descriptor_heap;
-  // TODO: Error
-  throw_if_failed(device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&descriptor_heap)));
+  check_hresult(device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&descriptor_heap)));
   m_descriptor_heap.reset(descriptor_heap);
 
   m_heap_start.m_cpu_handle = m_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
@@ -1721,8 +1824,7 @@ DX12StagingDescriptorHeap::~DX12StagingDescriptorHeap()
 {
   if (m_active_handle_count != 0)
   {
-    // TODO: Error
-    // AssertError("There were active handles when the descriptor heap was destroyed. Look for leaks.");
+    zv_fatal("There were active handles when the descriptor heap was destroyed. Look for leaks.");
   }
 }
 
@@ -1744,8 +1846,7 @@ DX12Descriptor DX12StagingDescriptorHeap::create_descriptor()
   }
   else
   {
-    // TODO: Error
-    // AssertError("Ran out of dynamic descriptor heap handles, need to increase heap size.");
+    zv_fatal("Ran out of dynamic descriptor heap handles, need to increase heap size.");
   }
 
   DX12Descriptor new_descriptor;
@@ -1767,8 +1868,7 @@ void DX12StagingDescriptorHeap::destroy_descriptor(DX12Descriptor descriptor)
 
   if (m_active_handle_count == 0)
   {
-    // TODO: Error
-    // AssertError("Freeing heap handles when there should be none left");
+    zv_fatal("Freeing heap handles when there should be none left");
     return;
   }
 
@@ -1792,8 +1892,7 @@ DX12RenderPassDescriptorHeap::DX12RenderPassDescriptorHeap(
 
 DX12Descriptor DX12RenderPassDescriptorHeap::get_reserved_descriptor(u32 index)
 {
-  // TODO: Error
-  // assert(index < m_reserved_handle_count);
+  zv_assert(index < m_reserved_handle_count);
 
   D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = m_heap_start.m_cpu_handle;
   D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle = m_heap_start.m_gpu_handle;
@@ -1824,8 +1923,7 @@ DX12Descriptor DX12RenderPassDescriptorHeap::allocate_user_descriptor_block(u32 
     }
     else
     {
-      // TODO: Error
-      // AssertError("Ran out of render pass descriptor heap handles, need to increase heap size.");
+      zv_fatal("Ran out of render pass descriptor heap handles, need to increase heap size.");
     }
   }
 
@@ -1863,8 +1961,7 @@ void DX12PipelineResourceSpace::set_cbv(DX12BufferResource* resource)
   {
     if (m_cbv == nullptr)
     {
-      // TODO: Error
-      // AssertError("Setting unused binding in a locked resource space");
+      zv_error("Setting unused binding in a locked resource space");
     }
     else
     {
@@ -1885,8 +1982,7 @@ void DX12PipelineResourceSpace::set_srv(const DX12PipelineResourceBinding& bindi
   {
     if (current_index == UINT_MAX)
     {
-      // TODO: Error
-      // AssertError("Setting unused binding in a locked resource space");
+      zv_error("Setting unused binding in a locked resource space");
     }
     else
     {
@@ -1915,8 +2011,7 @@ void DX12PipelineResourceSpace::set_uav(const DX12PipelineResourceBinding& bindi
   {
     if (current_index == UINT_MAX)
     {
-      // TODO: Error
-      // AssertError("Setting unused binding in a locked resource space");
+      zv_error("Setting unused binding in a locked resource space");
     }
     else
     {

@@ -1,64 +1,42 @@
 #include <windows.h>
+#include <Shlwapi.h>
+
+#include <ThirdParty/imgui/imgui.h>
+#include <ThirdParty/imgui/imgui_impl_win32.h>
+#include <ThirdParty/imgui/imgui_impl_dx12.h>
 
 #include <Platform/PlatformContext.h>
-#include <CoreTypes.h>
-#include <MathUtility.h>
+#include <CoreDefs.h>
+#include <MathLib.h>
 #include <Platform/DX12/DX12.h>
 #include <Shaders/Shared.h>
-#include <LoadImage.h>
+#include <Geometry.h>
+#include <Rendering.h>
+#include <Platform/Input.h>
+#include <Platform/Application.h>
+#include <Utility.h>
+
+#include <Log.h>
 
 #if ZV_COMPILER_CL
 #pragma warning(disable: 4100)  // unreferenced parameter
-#pragma warning(disable: 4505)  // unreferenced function with internal linkage
+// #pragma warning(disable: 4505)  // unreferenced function with internal linkage
 #pragma warning(disable: 4201)  // nonstandard extension used: nameless struct/union
 #endif
 
-static UniquePtr<DX12State> g_dx12_state = nullptr;
+static constexpr Vector3 g_forward = {0.0f, 0.0f, 1.0f};
+static constexpr Vector3 g_up = {0.0f, 1.0f, 0.0f};
+static constexpr Vector3 g_right = {1.0f, 0.0f, 0.0f};
 
-static MeshVertex g_vertices[24] = {
-  // Front face
-  { {-1, -1,  1}, {0.0f, 1.0f} },
-  { {-1,  1,  1}, {0.0f, 0.0f} },
-  { { 1,  1,  1}, {1.0f, 0.0f} },
-  { { 1, -1,  1}, {1.0f, 1.0f} },
-  // Back face
-  { { 1, -1, -1}, {0.0f, 1.0f} },
-  { { 1,  1, -1}, {0.0f, 0.0f} },
-  { {-1,  1, -1}, {1.0f, 0.0f} },
-  { {-1, -1, -1}, {1.0f, 1.0f} },
-  // Left face
-  { {-1, -1, -1}, {0.0f, 1.0f} },
-  { {-1,  1, -1}, {0.0f, 0.0f} },
-  { {-1,  1,  1}, {1.0f, 0.0f} },
-  { {-1, -1,  1}, {1.0f, 1.0f} },
-  // Right face
-  { { 1, -1,  1}, {0.0f, 1.0f} },
-  { { 1,  1,  1}, {0.0f, 0.0f} },
-  { { 1,  1, -1}, {1.0f, 0.0f} },
-  { { 1, -1, -1}, {1.0f, 1.0f} },
-  // Top face
-  { {-1,  1,  1}, {0.0f, 1.0f} },
-  { {-1,  1, -1}, {0.0f, 0.0f} },
-  { { 1,  1, -1}, {1.0f, 0.0f} },
-  { { 1,  1,  1}, {1.0f, 1.0f} },
-  // Bottom face
-  { {-1, -1, -1}, {0.0f, 1.0f} },
-  { {-1, -1,  1}, {0.0f, 0.0f} },
-  { { 1, -1,  1}, {1.0f, 0.0f} },
-  { { 1, -1, -1}, {1.0f, 1.0f} },
-};
+static Camera* g_camera = nullptr;
 
-static u16 g_indicies[36] =
+// TODO: WE ARE LEFT HANDED AND CW ORDER!!!
+
+inline s32 round_f32_to_s32(f32 value)
 {
-  0,  1,  2,  0,  2,  3,    // Front
-  4,  5,  6,  4,  6,  7,    // Back
-  8,  9, 10,  8, 10, 11,    // Left
-  12, 13, 14, 12, 14, 15,   // Right
-  16, 17, 18, 16, 18, 19,   // Top
-  20, 21, 22, 20, 22, 23    // Bottom
-};
-
-#include <Platform/Win32/Win32Window.cpp>
+    s32 result = (s32)roundf(value);
+    return result;
+}
 
 int CALLBACK WinMain(
   HINSTANCE hInstance,
@@ -66,113 +44,20 @@ int CALLBACK WinMain(
   LPSTR lpCmdLine,
   int nCmdShow)
 {
-  LARGE_INTEGER perf_count_frequency_result;
-  QueryPerformanceFrequency(&perf_count_frequency_result);
-  g_perf_count_frequency = perf_count_frequency_result.QuadPart;
-
-  win32_create_window(hInstance, L"Hello World Window", g_client_width, g_client_height);
-
-  g_dx12_state = make_unique_ptr<DX12State>(g_window_handle, g_client_width, g_client_height);
-  auto dx12_graphics_ctx = g_dx12_state->create_graphics_context();
-
-  s32 image_width = 0;
-  s32 image_height = 0;
-  s32 image_channels = 0;
-  u8* image_data = nullptr;
-  load_image_rgba("Assets/Textures/brickwall.jpg", &image_width, &image_height, &image_channels, &image_data);
-
-  RawTextureData texture_data{};
-  texture_data.m_width = image_width;
-  texture_data.m_height = image_height;
-  texture_data.m_num_channels = 4;
-  texture_data.m_data = image_data;
-  UniquePtr<DX12TextureData> dx12_texture_data = g_dx12_state->create_texture_data(texture_data);
-  free_image(image_data);
-
-  auto dx12_upload_ctx = g_dx12_state->get_upload_context_for_current_frame();
-  dx12_upload_ctx->record_texture_upload(dx12_texture_data.get());
-
-  // Create vertex buffer
-  DX12BufferResource::Desc vb_desc{};
-  vb_desc.m_size = sizeof(g_vertices);
-  vb_desc.m_stride = sizeof(MeshVertex);
-  vb_desc.m_access = DX12ResourceAccess::GpuOnly;
-  UniquePtr<DX12BufferResource> vertex_buffer = move_ptr(g_dx12_state->create_buffer_resource(vb_desc));
-  dx12_graphics_ctx->add_barrier(vertex_buffer.get(), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-  dx12_upload_ctx->record_buffer_upload(vertex_buffer.get(), g_vertices, sizeof(g_vertices));
-
-  // Create index buffer
-  DX12BufferResource::Desc ib_desc{};
-  ib_desc.m_size = sizeof(g_indicies);
-  ib_desc.m_stride = sizeof(u16);
-  ib_desc.m_access = DX12ResourceAccess::GpuOnly;
-  UniquePtr<DX12BufferResource> index_buffer = move_ptr(g_dx12_state->create_buffer_resource(ib_desc));
-  dx12_graphics_ctx->add_barrier(index_buffer.get(), D3D12_RESOURCE_STATE_INDEX_BUFFER);
-  dx12_upload_ctx->record_buffer_upload(index_buffer.get(), g_indicies, sizeof(g_indicies));
-
-  StaticArray<UniquePtr<DX12BufferResource>, k_num_frames_in_flight> per_object_constant_buffers;
-
-  DX12BufferResource::Desc per_object_cb_desc{};
-  per_object_cb_desc.m_size = sizeof(PerObjectConstants);
-  per_object_cb_desc.m_access = DX12ResourceAccess::HostWritable;
-  per_object_cb_desc.m_view_flags.set(DX12BufferViewFlags::CBV);
-
-  for (u32 i = 0; i < k_num_frames_in_flight; ++i)
+  // Set the working directory to the path of the executable.
+  WCHAR path[MAX_PATH];
+  HMODULE hModule = GetModuleHandleW(NULL);
+  if (GetModuleFileNameW(hModule, path, MAX_PATH) > 0)
   {
-    per_object_constant_buffers[i] = g_dx12_state->create_buffer_resource(per_object_cb_desc);
+    PathRemoveFileSpecW(path);
+    SetCurrentDirectoryW(path);
   }
 
-  PerObjectConstants object_constants;
-  per_object_constant_buffers[0]->copy_data(&object_constants, sizeof(PerObjectConstants));
+  ZV::Log::initialize();
 
-  DX12PipelineResourceSpace per_object_resource_space;
-  per_object_resource_space.set_cbv(per_object_constant_buffers[0].get());
-  per_object_resource_space.lock();
+  Assets::initialize();
 
-  UniquePtr<DX12BufferResource> per_pass_constants_buffer;
-
-  DX12BufferResource::Desc per_pass_cb_desc{};
-  per_pass_cb_desc.m_size = sizeof(PerPassConstants);
-  per_pass_cb_desc.m_access = DX12ResourceAccess::HostWritable;
-  per_pass_cb_desc.m_view_flags.set(DX12BufferViewFlags::CBV);
-
-  per_pass_constants_buffer = g_dx12_state->create_buffer_resource(per_pass_cb_desc);
-
-  f32 field_of_view = 3.14159f / 4.0f;
-  f32 aspect_ratio = (f32)g_client_width / (f32)g_client_height;
-  Vector3 camera_position = Vector3(-2.0f, 2.0f, 6.0f);  // Right-handed coordinate system
-
-  PerPassConstants pass_constants;
-  pass_constants.view_matrix = Matrix::CreateLookAt(camera_position, Vector3(0, 0, 0), Vector3(0, 1, 0));
-  pass_constants.projection_matrix = Matrix::CreatePerspectiveFieldOfView(field_of_view, aspect_ratio, 0.01f, 1000.0f);
-  pass_constants.camera_position = camera_position;
-
-  per_pass_constants_buffer->copy_data(&pass_constants, sizeof(PerPassConstants));
-
-  DX12PipelineResourceBinding diffuse_texture_binding{};
-  diffuse_texture_binding.m_resource = dx12_texture_data->m_texture_resource.get();
-  diffuse_texture_binding.m_binding_index = 0;
-
-  DX12PipelineResourceSpace per_pass_resource_space;
-  per_pass_resource_space.set_cbv(per_pass_constants_buffer.get());
-  per_pass_resource_space.set_srv(diffuse_texture_binding);
-  per_pass_resource_space.lock();
-  
-  DX12PipelineState::Desc pipeline_desc = get_default_pipeline_state_desc();
-  pipeline_desc.m_vs_path = L"Shaders/cube_vs.cso";
-  pipeline_desc.m_ps_path = L"Shaders/cube_ps.cso";
-  pipeline_desc.m_render_target_desc.m_num_render_targets = 1;
-  pipeline_desc.m_render_target_desc.m_render_target_formats[0] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-  pipeline_desc.m_render_target_desc.m_depth_stencil_format = DXGI_FORMAT_D32_FLOAT;
-  pipeline_desc.m_spaces[DX12ResourceSpace::PerObjectSpace] = &per_object_resource_space;
-  pipeline_desc.m_spaces[DX12ResourceSpace::PerPassSpace] = &per_pass_resource_space;
-  pipeline_desc.m_input_layout.m_elements[0] = { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 };
-  pipeline_desc.m_input_layout.m_elements[1] = { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 };
-  pipeline_desc.m_input_layout.m_num_elements = 2;
-  pipeline_desc.m_depth_stencil_desc.DepthEnable = true;
-  pipeline_desc.m_depth_stencil_desc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-
-  auto cube_pipeline = g_dx12_state->create_graphics_pipeline(pipeline_desc);
+  Assets::load_texture_asset("dummy");
 
   // TODO: Remove DirectX Math library
   // Check for DirectX Math library support.
@@ -182,16 +67,152 @@ int CALLBACK WinMain(
     return false;
   }
 
-  game_input input[2] = {};
-  game_input* new_input = &input[0];
-  game_input* old_input = &input[1];
+  UniquePtr<Application> application = make_unique_ptr<Application>(hInstance, L"Hello World Window");
+  
+  ZV::Input::initialize();
+
+  ZV::Input::set_mouse_sensitivity(0.005f);
+  ZV::Input::set_camera_speed(6.0f);
+
+  // auto geometry = create_triangle();
+  // auto geometry = create_quad();
+  auto geometry = create_plane(2.0f, 2.0f, 8, 8);
+  // auto geometry = create_box();
+  auto geometry2 = create_sphere(1.0f, 32, 64);
+  // auto geometry2 = create_icosphere(1.0f, 5);
+  // auto geometry = create_cylinder();
+  // auto geometry = create_capsule();
+
+  Vector3 camera_position{};
+  Quaternion camera_rotation{};
+
+  Renderer* renderer = Application::get().get_renderer();
+
+  // Setup Renderer
+  {
+    g_camera = renderer->create_camera();
+    renderer->set_active_camera(g_camera);
+
+    g_camera->get_transform(camera_position, camera_rotation);
+
+    Vector3 hemispheric_light_color = {0.025f, 0.025f, 0.025f};
+    renderer->set_hemispheric_light_color(hemispheric_light_color);
+
+    GlobalLight* global_light = renderer->create_global_light();
+    global_light->direction = {0.0f, -1.0f, 0.0f, 1.0f};
+    global_light->intensity = 6.0f;
+    global_light->light_color = {1.0f, 1.0f, 1.0f};
+  
+    // PunctualLight* point_light = renderer->create_punctual_light();
+    // point_light->position = {-0.5f, 0.5f, -0.5f};
+    // point_light->intensity = 2.0f;
+    // point_light->light_color = {1.0f, 1.0f, 1.0f};
+    // point_light->set_inv_sqr_att_radius(1.5f);
+    // point_light->type = PunctualLightType::Point;
+  
+    // PunctualLight* spot_light = renderer->create_punctual_light();
+    // spot_light->position = {0.5f, 0.5f, 0.5f};
+    // spot_light->intensity = 2.0f;
+    // spot_light->light_color = {1.0f, 1.0f, 1.0f};
+    // spot_light->set_inv_sqr_att_radius(1.5f);
+    // spot_light->type = PunctualLightType::Spot;
+    // spot_light->direction = {0.0f, -1.0f, 0.0f};
+    // spot_light->set_angle_scale_and_offset(30.0f * ZV_DEG_TO_RAD, 45.0f * ZV_DEG_TO_RAD);
+
+    Vector4 clear_color = {0.025f, 0.025f, 0.025f, 1.0f};
+    renderer->set_clear_color(clear_color);
+
+    // DebugPrimitive* debug_primitive_grid = renderer->create_debug_primitive(geometry);
+    // debug_primitive_grid->m_material_info.m_albedo_texture_id = AssetId("grid_albedo");
+    // debug_primitive_grid->m_material_info.m_normal_texture_id = AssetId("grid_normal");
+    // debug_primitive_grid->m_material_info.m_metallic_roughness_texture_id = AssetId("grid_roughness");
+    // debug_primitive_grid->m_material_info.m_overlay_texture_id = AssetId("grid_overlay");
+    // debug_primitive_grid->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    // debug_primitive_grid->m_material_info.m_albedo_color = {1.0f, 0.533f, 0.153f};
+    // debug_primitive_grid->m_world_matrix = Matrix::CreateTranslation(0.0f, 0.0f, -2.5f);
+    // renderer->push_debug_primitive(debug_primitive_grid);
+
+    // DebugPrimitive* debug_primitive_grid2 = renderer->create_debug_primitive(geometry);
+    // debug_primitive_grid2->m_material_info.m_albedo_texture_id = AssetId("grid_albedo");
+    // debug_primitive_grid2->m_material_info.m_normal_texture_id = AssetId("grid_normal");
+    // debug_primitive_grid2->m_material_info.m_metallic_roughness_texture_id = AssetId("grid_roughness");
+    // debug_primitive_grid2->m_material_info.m_overlay_texture_id = AssetId("grid_overlay");
+    // debug_primitive_grid2->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    // debug_primitive_grid2->m_material_info.m_albedo_color = { 0.145f, 0.631f, 1.0f };
+    // debug_primitive_grid2->m_world_matrix = Matrix::CreateTranslation(0.0f, 0.0f, -5.0f);
+    // renderer->push_debug_primitive(debug_primitive_grid2);
+
+    // DebugPrimitive* debug_primitive_mat_probe_brick_wall_low = renderer->create_debug_primitive(geometry2);
+    // debug_primitive_mat_probe_brick_wall_low->m_material_info.m_albedo_texture_id = AssetId("brick_wall_low_albedo");
+    // debug_primitive_mat_probe_brick_wall_low->m_material_info.m_normal_texture_id = AssetId("brick_wall_low_normal");
+    // debug_primitive_mat_probe_brick_wall_low->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, -2.5f);
+    // renderer->push_debug_primitive(debug_primitive_mat_probe_brick_wall_low);
+
+    // DebugPrimitive* debug_primitive_mat_probe_brick_wall = renderer->create_debug_primitive(geometry2);
+    // debug_primitive_mat_probe_brick_wall->m_material_info.m_albedo_texture_id = AssetId("brick_wall_albedo");
+    // debug_primitive_mat_probe_brick_wall->m_material_info.m_normal_texture_id = AssetId("brick_wall_normal");
+    // debug_primitive_mat_probe_brick_wall->m_material_info.m_metallic_roughness_texture_id = AssetId("brick_wall_roughness");
+    // debug_primitive_mat_probe_brick_wall->m_material_info.m_ao_texture_id = AssetId("brick_wall_ao");
+    // debug_primitive_mat_probe_brick_wall->m_material_info.m_specular_texture_id = AssetId("brick_wall_specular");
+    // debug_primitive_mat_probe_brick_wall->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    // debug_primitive_mat_probe_brick_wall->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, -2.5f);
+    // renderer->push_debug_primitive(debug_primitive_mat_probe_brick_wall);
+
+    // DebugPrimitive* debug_primitive_mat_probe_metal_sheet = renderer->create_debug_primitive(geometry2);
+    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_albedo_texture_id = AssetId("metal_sheet_albedo");
+    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_normal_texture_id = AssetId("metal_sheet_normal");
+    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_metallic_roughness_texture_id = AssetId("metal_sheet_metalRoughness");
+    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_specular_texture_id = AssetId("metal_sheet_specular");
+    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_ao_texture_id = AssetId("metal_sheet_ao");
+    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_channel_packing = ChannelPacking::Roughness | ChannelPacking::Metalness;
+    // debug_primitive_mat_probe_metal_sheet->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, 0.0f);
+    // renderer->push_debug_primitive(debug_primitive_mat_probe_metal_sheet);
+
+    // DebugPrimitive* debug_primitive_mat_probe_planks = renderer->create_debug_primitive(geometry2);
+    // debug_primitive_mat_probe_planks->m_material_info.m_albedo_texture_id = AssetId("planks_albedo");
+    // debug_primitive_mat_probe_planks->m_material_info.m_normal_texture_id = AssetId("planks_normal");
+    // debug_primitive_mat_probe_planks->m_material_info.m_metallic_roughness_texture_id = AssetId("planks_roughness");
+    // debug_primitive_mat_probe_planks->m_material_info.m_specular_texture_id = AssetId("planks_specular");
+    // debug_primitive_mat_probe_planks->m_material_info.m_ao_texture_id = AssetId("planks_ao");
+    // debug_primitive_mat_probe_planks->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    // debug_primitive_mat_probe_planks->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, 0.0f);
+    // renderer->push_debug_primitive(debug_primitive_mat_probe_planks);
+
+    // DebugPrimitive* debug_primitive_mat_probe_tiles = renderer->create_debug_primitive(geometry2);
+    // debug_primitive_mat_probe_tiles->m_material_info.m_albedo_texture_id = AssetId("tiles_albedo");
+    // debug_primitive_mat_probe_tiles->m_material_info.m_normal_texture_id = AssetId("tiles_normal");
+    // debug_primitive_mat_probe_tiles->m_material_info.m_metallic_roughness_texture_id = AssetId("tiles_roughness");
+    // debug_primitive_mat_probe_tiles->m_material_info.m_specular_texture_id = AssetId("tiles_specular");
+    // debug_primitive_mat_probe_tiles->m_material_info.m_ao_texture_id = AssetId("tiles_ao");
+    // debug_primitive_mat_probe_tiles->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    // debug_primitive_mat_probe_tiles->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, 2.5f);
+    // renderer->push_debug_primitive(debug_primitive_mat_probe_tiles);
+
+    // DebugPrimitive* debug_primitive_mat_probe_wood = renderer->create_debug_primitive(geometry2);
+    // debug_primitive_mat_probe_wood->m_material_info.m_albedo_texture_id = AssetId("wood_albedo");
+    // debug_primitive_mat_probe_wood->m_material_info.m_normal_texture_id = AssetId("wood_normal");
+    // debug_primitive_mat_probe_wood->m_material_info.m_metallic_roughness_texture_id = AssetId("wood_roughness");
+    // debug_primitive_mat_probe_wood->m_material_info.m_specular_texture_id = AssetId("wood_specular");
+    // debug_primitive_mat_probe_wood->m_material_info.m_ao_texture_id = AssetId("wood_ao");
+    // debug_primitive_mat_probe_wood->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    // debug_primitive_mat_probe_wood->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, 2.5f);
+    // renderer->push_debug_primitive(debug_primitive_mat_probe_wood);
+
+    // renderer->push_model("DamagedHelmet", Matrix::CreateTranslation(0.0f, 0.5f, 0.0f));
+
+    auto world_matrix_sponza = Matrix::CreateRotationX(ZV_PI) * Matrix::CreateRotationY(ZV_PI / 2.0f) * Matrix::CreateTranslation(0.0f, -16.0f, 32.0f);
+    renderer->push_model("Sponza", world_matrix_sponza);
+  }
 
   LARGE_INTEGER last_counter = win32_get_wall_clock();
   LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
 
-  // win32_toggle_fullscreen(g_window_handle);
+  Win32Window* window = Application::get().get_window();
+  // win32_toggle_fullscreen(window);
 
-  HDC renderer_dc = GetDC(g_window_handle);
+  HWND window_handle = window->m_window_handle;
+  
+  HDC renderer_dc = GetDC(window_handle);
   s32 monitor_refresh_hz = 60;
   s32 win32_refresh_rate = GetDeviceCaps(renderer_dc, VREFRESH);
   if (win32_refresh_rate > 1)
@@ -200,79 +221,23 @@ int CALLBACK WinMain(
   }
   f32 game_update_hz = (f32)(monitor_refresh_hz);
 
-  g_running = true;
+  Application::get().set_running(true);
 
-  ::ShowWindow(g_window_handle, SW_SHOWMAXIMIZED);
-  //::ShowWindow(g_window_handle, SW_SHOW);
+  // ::ShowWindow(window_handle, SW_SHOWMAXIMIZED);
+  ::ShowWindow(window_handle, SW_SHOW);
 
   u32 expected_frames_per_update = 1;
   f32 target_seconds_per_frame = (f32)expected_frames_per_update / (f32)game_update_hz;
 
-  while (g_running)
+  while (Application::get().is_running() && !ZV::Input::is_quit_requested())
   {
-    // Process Input
+    ZV::Input::update();
 
-    // TODO: We can't zero everything because the up/down state will
-    // be wrong!!!
-    game_controller_input *old_keyboard_controller = get_controller(old_input, 0);
-    game_controller_input *new_keyboard_controller = get_controller(new_input, 0);
-    *new_keyboard_controller = {};
-    new_keyboard_controller->is_connected = true;
-    for(int button_index = 0;
-        button_index < ArrayCount(new_keyboard_controller->buttons);
-        ++button_index)
-    {
-      new_keyboard_controller->buttons[button_index].ended_down =
-      old_keyboard_controller->buttons[button_index].ended_down;
-    }
-
-    win32_process_pending_messages(new_keyboard_controller);
+    // We need to call this early, so calls to push_model by game code are not overwritten by the renderer
+    renderer->process_previous_frame_loads();
     
-    if (!g_pause)
-    {
-      // Get Mouse Position
-      {
-          POINT mouse_p;
-          GetCursorPos(&mouse_p);
-          ScreenToClient(g_window_handle, &mouse_p);
-          new_input->mouse_x = (f32)mouse_p.x;
-          new_input->mouse_y = (f32)((g_client_height - 1) - mouse_p.y);  // TODO: backbuffer height (1080)
-          new_input->mouse_z = 0; // TODO: Support mousewheel?
-
-          new_input->shift_down = (GetKeyState(VK_SHIFT) & (1 << 15));
-          new_input->alt_down = (GetKeyState(VK_MENU) & (1 << 15));
-          new_input->control_down = (GetKeyState(VK_CONTROL) & (1 << 15));
-      }
-
-      // Get Keyboard State
-      {
-        DWORD win_button_id[PlatformMouseButton_Count] =
-        {
-            VK_LBUTTON,
-            VK_MBUTTON,
-            VK_RBUTTON,
-            VK_XBUTTON1,
-            VK_XBUTTON2,
-        };
-        for(u32 button_index = 0;
-            button_index < PlatformMouseButton_Count;
-            ++button_index)
-        {
-            new_input->mouse_buttons[button_index] = old_input->mouse_buttons[button_index];
-            new_input->mouse_buttons[button_index].half_transition_count = 0;
-            win32_process_keyboard_message(&new_input->mouse_buttons[button_index],
-                GetKeyState(win_button_id[button_index]) & (1 << 15));
-        }
-      }
-
-      // Get Controller State
-      {
-        // TODO
-      }
-    }
-
     // TODO: Update Game
-    if (!g_pause)
+    if (!Application::get().is_paused())
     {
       static u64 frame_count = 0;
       static f64 total_time = 0.0;
@@ -292,66 +257,148 @@ int CALLBACK WinMain(
           total_time = 0.0;
       }
 
-      // Update the model matrix.
-      f32 rotation = DirectX::XMConvertToRadians(static_cast<f32>(total_time * 90.0f));
-      object_constants.world_matrix = Matrix::CreateRotationY(rotation);
+      // Camera movement
+      {
+        bool mouse_move_button_pressed = ZV::Input::is_mouse_button_down(MouseButtonWin32::Right) || ZV::Input::is_mouse_button_down(MouseButtonWin32::Middle);
+
+        // Uncapture mouse
+        if (!mouse_move_button_pressed)
+        {
+          ZV::Input::set_mouse_captured(false);
+        }
+        // Handle camera movement
+        else
+        {
+          if (!ZV::Input::is_mouse_captured())
+          {
+            ZV::Input::set_mouse_captured(true);
+          }
+          else
+          {
+              const Vector2 mouse_delta = ZV::Input::get_mouse_delta();
+
+              // Camera rotation
+              if (ZV::Input::is_mouse_button_down(MouseButtonWin32::Right))
+              {
+                  // Flip yaw when upside-down
+                  static float yaw_sign = 1.0f; // +1 = normal, -1 = flipped
+                  // How "tilted" are we? Compare camera-up to world-up.
+                  const Vector3 cam_up = Vector3::Transform(g_up, camera_rotation);
+                  const float up_dot = cam_up.Dot(g_up); // +1 upright, -1 upside-down
+
+                  // Hysteresis thresholds (avoid rapid flip-flop near the pole)
+                  constexpr float hi = 0.25f;  // ~cos(75°)
+                  constexpr float lo = -0.25f; // ~cos(105°)
+                  if (yaw_sign > 0.0f && up_dot < lo) yaw_sign = -1.0f;
+                  else if (yaw_sign < 0.0f && up_dot > hi) yaw_sign = 1.0f;
+
+                  const f32 yaw = (mouse_delta.x * ZV::Input::get_mouse_sensitivity()) * yaw_sign;
+                  const f32 pitch = -mouse_delta.y * ZV::Input::get_mouse_sensitivity();
+
+                  const Quaternion yaw_rotation = Quaternion::CreateFromAxisAngle(g_up, yaw);
+                  const Quaternion pitch_rotation = Quaternion::CreateFromAxisAngle(g_right, pitch);
+
+                  camera_rotation = pitch_rotation * camera_rotation * yaw_rotation;
+                  camera_rotation.Normalize();
+              }
+              // Camera panning
+              else  // Middle mouse button pressed
+              {
+                  camera_position += Vector3::Transform(g_right, camera_rotation) * mouse_delta.x * ZV::Input::get_camera_speed() * target_seconds_per_frame;
+                  camera_position += Vector3::Transform(g_up, camera_rotation) * mouse_delta.y * ZV::Input::get_camera_speed() * target_seconds_per_frame;
+              }
+          }
+
+          // Camera wasd movement
+          Vector2 movement{ 0.0f, 0.0f };
+          movement.x += ZV::Input::is_key_down(KeyboardKeyWin32::A) || ZV::Input::is_key_down(KeyboardKeyWin32::ArrowLeft) ? -1.0f : 0.0f;
+          movement.x += ZV::Input::is_key_down(KeyboardKeyWin32::D) || ZV::Input::is_key_down(KeyboardKeyWin32::ArrowRight) ? 1.0f : 0.0f;
+          movement.y += ZV::Input::is_key_down(KeyboardKeyWin32::W) || ZV::Input::is_key_down(KeyboardKeyWin32::ArrowUp) ? 1.0f : 0.0f;
+          movement.y += ZV::Input::is_key_down(KeyboardKeyWin32::S) || ZV::Input::is_key_down(KeyboardKeyWin32::ArrowDown) ? -1.0f : 0.0f;
+          movement.Normalize();
+
+          camera_position += Vector3::Transform(g_forward, camera_rotation) * movement.y * ZV::Input::get_camera_speed() * target_seconds_per_frame;
+          camera_position += Vector3::Transform(g_right, camera_rotation) * movement.x * ZV::Input::get_camera_speed() * target_seconds_per_frame;
+        }
+      }
     }
 
     // TODO: Update Audio
-    if (!g_pause)
+    if (!Application::get().is_paused())
     {
     }
 
-    // Frame Display
+    // Update imgui
     {
-      g_dx12_state->begin_frame();
+      renderer->begin_frame_imgui();
 
-      DX12TextureResource* back_buffer = g_dx12_state->get_current_back_buffer();
-      DX12TextureResource* depth_buffer = g_dx12_state->get_depth_stencil_buffer();
+      ImGui::Begin("Debug Settings");
 
-      dx12_graphics_ctx->reset();
-      dx12_graphics_ctx->add_barrier(back_buffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-      dx12_graphics_ctx->add_barrier(depth_buffer, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-      dx12_graphics_ctx->flush_barriers();
+      ImGui::Text(ZV::format("FPS: {}", 1.0 / target_seconds_per_frame).c_str());
+      ImGui::Text(ZV::format("Client size: {}, {}", Application::get().get_client_width(), Application::get().get_client_height()).c_str());
 
-      f32 clear_color[4] = {0.05f, 0.05f, 0.05f, 1.0f};
-      dx12_graphics_ctx->clear_render_target(back_buffer, clear_color);
-      dx12_graphics_ctx->clear_depth_stencil_target(depth_buffer);
+      auto vm = g_camera->m_view_matrix;
+      auto pm = g_camera->m_projection_matrix;
 
-      per_object_constant_buffers[g_dx12_state->get_frame_id()]->copy_data(&object_constants, sizeof(PerObjectConstants));
-      per_object_resource_space.set_cbv(per_object_constant_buffers[g_dx12_state->get_frame_id()].get());
+      ImGui::Text("Camera");
+      ImGui::Text(ZV::format("Position: {}, {}, {}", camera_position.x, camera_position.y, camera_position.z).c_str());
+      ImGui::Text(ZV::format("Position(M): {}, {}, {}", g_camera->m_world_matrix._41, g_camera->m_world_matrix._42, g_camera->m_world_matrix._43).c_str());
+      ImGui::Text("Camera View Matrix");
+      ImGui::Text(ZV::format("{}, {}, {}, {}", vm._11, vm._12, vm._13, vm._14).c_str());
+      ImGui::Text(ZV::format("{}, {}, {}, {}", vm._21, vm._22, vm._23, vm._24).c_str());
+      ImGui::Text(ZV::format("{}, {}, {}, {}", vm._31, vm._32, vm._33, vm._34).c_str());
+      ImGui::Text(ZV::format("{}, {}, {}, {}", vm._41, vm._42, vm._43, vm._44).c_str());
+      ImGui::Text("Camera Projection Matrix");
+      ImGui::Text(ZV::format("{}, {}, {}, {}", pm._11, pm._12, pm._13, pm._14).c_str());
+      ImGui::Text(ZV::format("{}, {}, {}, {}", pm._21, pm._22, pm._23, pm._24).c_str());
+      ImGui::Text(ZV::format("{}, {}, {}, {}", pm._31, pm._32, pm._33, pm._34).c_str());
+      ImGui::Text(ZV::format("{}, {}, {}, {}", pm._41, pm._42, pm._43, pm._44).c_str());
 
-      cube_pipeline->m_render_targets.clear();
-      cube_pipeline->m_render_targets.emplace_back(back_buffer);
+      ImGui::Text("Input");
+      ImGui::Text(ZV::format("Mouse Position: {}, {}", ZV::Input::get_mouse_position().x, ZV::Input::get_mouse_position().y).c_str());
+      ImGui::Text(ZV::format("Mouse Delta: {}, {}", ZV::Input::get_mouse_delta().x, ZV::Input::get_mouse_delta().y).c_str());
+      ImGui::Text(ZV::format("Mouse Right: {}", ZV::Input::is_mouse_button_down(MouseButtonWin32::Right) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("Mouse Left: {}", ZV::Input::is_mouse_button_down(MouseButtonWin32::Left) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("Mouse Middle: {}", ZV::Input::is_mouse_button_down(MouseButtonWin32::Middle) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("Mouse X1: {}", ZV::Input::is_mouse_button_down(MouseButtonWin32::Extended1) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("Mouse X2: {}", ZV::Input::is_mouse_button_down(MouseButtonWin32::Extended2) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("W: {}", ZV::Input::is_key_down(KeyboardKeyWin32::W) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("A: {}", ZV::Input::is_key_down(KeyboardKeyWin32::A) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("S: {}", ZV::Input::is_key_down(KeyboardKeyWin32::S) ? "pressed" : "released").c_str());
+      ImGui::Text(ZV::format("D: {}", ZV::Input::is_key_down(KeyboardKeyWin32::D) ? "pressed" : "released").c_str());
 
-      dx12_graphics_ctx->set_pipeline_state(cube_pipeline.get());
-      dx12_graphics_ctx->set_pipeline_resources(DX12ResourceSpace::PerObjectSpace, &per_object_resource_space);
-      dx12_graphics_ctx->set_pipeline_resources(DX12ResourceSpace::PerPassSpace, &per_pass_resource_space);
-      dx12_graphics_ctx->set_vertex_buffer(vertex_buffer.get());
-      dx12_graphics_ctx->set_index_buffer(index_buffer.get());
-      dx12_graphics_ctx->set_viewport_and_scissor(g_client_width, g_client_height);
-      dx12_graphics_ctx->set_primitive_topology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-      dx12_graphics_ctx->draw_indexed(_countof(g_indicies));
+      ImGui::End();
 
-      dx12_graphics_ctx->add_barrier(back_buffer, D3D12_RESOURCE_STATE_PRESENT);
-      dx12_graphics_ctx->flush_barriers();
+      renderer->end_frame_imgui();
+    }
 
-      g_dx12_state->submit_context(dx12_graphics_ctx.get());
+    // Update renderer data
+    {
+      g_camera->update_projection_matrix(
+        3.14159f / 4.0f, 
+        (f32)Application::get().get_client_width() / (f32)Application::get().get_client_height()
+      );
+      g_camera->update_view_matrix(
+        camera_position, 
+        camera_position + Vector3::Transform(g_forward, camera_rotation), 
+        Vector3::Transform(g_up, camera_rotation)
+      );
+      
+      renderer->update_active_camera();
+    }
 
-      g_dx12_state->end_frame();
-      g_dx12_state->present();
+    // Frame display
+    {
+      // TODO: Handle this within Application
+      renderer->set_client_size(Application::get().get_client_width(), Application::get().get_client_height());
+      renderer->render();
     }
 
     // End Loop
     flip_wall_clock = win32_get_wall_clock();
 
-    game_input *temp = new_input;
-    new_input = old_input;
-    old_input = temp;
-    // TODO: Should I clear these here?
-
     LARGE_INTEGER end_counter = win32_get_wall_clock();
-    f32 measured_seconds_per_frame = win32_get_seconds_elapsed(last_counter, end_counter);
+    f32 measured_seconds_per_frame = win32_get_seconds_elapsed(last_counter, end_counter, Application::get().get_perf_count_frequency());
     f32 exact_target_frames_per_update = measured_seconds_per_frame * (f32)monitor_refresh_hz;
     u32 new_expected_frames_per_update = round_f32_to_s32(exact_target_frames_per_update);
     expected_frames_per_update = new_expected_frames_per_update;
@@ -362,25 +409,9 @@ int CALLBACK WinMain(
     last_counter = end_counter;
   }
 
-  g_dx12_state->flush_queues();
-
-  g_dx12_state->destroy_texture_resource(move_ptr(dx12_texture_data->m_texture_resource));
-  g_dx12_state->destroy_buffer_resource(move_ptr(vertex_buffer));
-  g_dx12_state->destroy_buffer_resource(move_ptr(index_buffer));
-  g_dx12_state->destroy_buffer_resource(move_ptr(per_pass_constants_buffer));
-  g_dx12_state->destroy_pipeline_state(move_ptr(cube_pipeline));
-
-  for (u32 frame_index = 0; frame_index < k_num_frames_in_flight; frame_index++)
-  {
-      g_dx12_state->destroy_buffer_resource(move_ptr(per_object_constant_buffers[frame_index]));
-  }
-
-  // ImGui_ImplDX12_Shutdown();
-  // ImGui_ImplWin32_Shutdown();
-
-  g_dx12_state->destroy_context(move_ptr(dx12_graphics_ctx));
-
-  g_dx12_state = nullptr;
+  ZV::Input::shutdown();
+  Assets::shutdown();
+  ZV::Log::shutdown();
 
   return 0;
 }

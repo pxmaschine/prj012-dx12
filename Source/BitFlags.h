@@ -66,3 +66,45 @@ public:
   constexpr bool operator==(const ThisType &other) const { return m_value == other.m_value; }
   constexpr bool operator!=(const ThisType &other) const { return m_value != other.m_value; }
 };
+
+// Helper macro to define bitmask operators for a specific enum type
+#define DEFINE_BITMASK_OPERATORS(EnumType)                                      \
+inline constexpr EnumType operator|(EnumType lhs, EnumType rhs)                \
+{                                                                              \
+    using Underlying = std::underlying_type_t<EnumType>;                      \
+    return static_cast<EnumType>(                                              \
+        static_cast<Underlying>(lhs) | static_cast<Underlying>(rhs));         \
+}                                                                              \
+inline constexpr EnumType operator&(EnumType lhs, EnumType rhs)               \
+{                                                                              \
+    using Underlying = std::underlying_type_t<EnumType>;                      \
+    return static_cast<EnumType>(                                              \
+        static_cast<Underlying>(lhs) & static_cast<Underlying>(rhs));         \
+}                                                                              \
+inline constexpr EnumType operator^(EnumType lhs, EnumType rhs)               \
+{                                                                              \
+    using Underlying = std::underlying_type_t<EnumType>;                      \
+    return static_cast<EnumType>(                                              \
+        static_cast<Underlying>(lhs) ^ static_cast<Underlying>(rhs));         \
+}                                                                              \
+inline constexpr EnumType operator~(EnumType value)                            \
+{                                                                              \
+    using Underlying = std::underlying_type_t<EnumType>;                      \
+    return static_cast<EnumType>(~static_cast<Underlying>(value));            \
+}                                                                              \
+inline EnumType& operator|=(EnumType& lhs, EnumType rhs)                       \
+{                                                                              \
+    lhs = lhs | rhs;                                                           \
+    return lhs;                                                                \
+}                                                                              \
+inline EnumType& operator&=(EnumType& lhs, EnumType rhs)                       \
+{                                                                              \
+    lhs = lhs & rhs;                                                           \
+    return lhs;                                                                \
+}                                                                              \
+inline EnumType& operator^=(EnumType& lhs, EnumType rhs)                       \
+{                                                                              \
+    lhs = lhs ^ rhs;                                                           \
+    return lhs;                                                                \
+}
+

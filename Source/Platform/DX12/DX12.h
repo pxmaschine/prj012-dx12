@@ -4,24 +4,13 @@
 
 #include <ThirdParty/d3dx12/d3dx12.h>
 
-#include <CoreTypes.h>
+#include <CoreDefs.h>
 #include <BitFlags.h>
 #include <Platform/DX12/DX12Utility.h>
+#include <Log.h>
 
 class DX12State;
-
-// TODO: Cleanup
-struct RawTextureData
-{
-  u32 m_width;
-  u32 m_height;
-  u32 m_num_channels;
-  u8* m_data;
-  D3D12_RESOURCE_DIMENSION m_dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  u16 m_mip_levels = 1;
-  u16 m_depth = 1;       // Should be 1 for 1D or 2D textures
-  u16 m_array_size = 1;  // For cubemap, this is a multiple of 6
-};
+struct TextureAsset;
 
 constexpr u8 k_num_frames_in_flight = 2;
 constexpr u8 k_num_back_buffers = 3;
@@ -34,6 +23,10 @@ constexpr u32 k_invalid_resource_table_index = UINT_MAX;
 constexpr u32 k_max_texture_subresource_count = 32;
 constexpr u32 k_max_resource_barriers = 16;
 constexpr u32 k_max_input_layout_elements = 16;
+constexpr u32 k_imgui_reserved_descriptor_index = 0;
+
+constexpr u32 k_buffer_upload_heap_size = Megabytes(32);
+constexpr u32 k_texture_upload_heap_size = Megabytes(128);
 
 struct DX12Descriptor
 {
@@ -138,6 +131,12 @@ struct DX12BufferResource final : public DX12Resource
     u32 m_stride = 0;
     DX12BufferViewBitFlags m_view_flags{ DX12BufferViewFlags::None };
     bool m_is_raw_access = false;
+    enum class BufferType : u8
+    {
+      GenericBuffer = 0,
+      VertexBuffer = 1,
+      IndexBuffer = 2,
+    } m_buffer_type = BufferType::GenericBuffer;
   };
 
   DX12BufferResource() : DX12Resource()
@@ -145,11 +144,11 @@ struct DX12BufferResource final : public DX12Resource
     m_type = DX12ResourceType::Buffer;
   }
 
-  void copy_data(void* data, u32 data_size)
+  void copy_data(void* data, u32 data_size, u32 offset = 0)
   {
-    // TODO: Error
-    // assert(m_mapped_data != nullptr && data != nullptr && data_size > 0 && data_size <= m_size);
-    memcpy_s(m_mapped_data, m_size, data, data_size);
+    zv_assert(m_mapped_data != nullptr && data != nullptr && data_size > 0 && data_size <= m_size);
+    u32 aligned_size = align_u32(data_size, 256);
+    memcpy_s(m_mapped_data + aligned_size * offset, m_size, data, data_size);
   }
 
   u32 m_stride;
@@ -185,6 +184,7 @@ struct DX12TextureResource final : public DX12Resource
     D3D12_RESOURCE_FLAGS m_flags = D3D12_RESOURCE_FLAG_NONE;
     DX12TextureViewBitFlags m_view_flags{ DX12TextureViewFlags::None };
     DX12ResourceAccess m_access = DX12ResourceAccess::GpuOnly;
+    bool m_is_msaa_enabled = false;
   };
 
   DX12TextureResource() : DX12Resource()
@@ -302,7 +302,6 @@ struct DX12PipelineState
   UniquePtr<ID3D12RootSignature, COMDeleter<ID3D12RootSignature>> m_root_signature;
   DX12PipelineStateType m_type = DX12PipelineStateType::Graphics;
   DX12PipelineResourceMapping m_resource_mapping;
-  DynamicArray<DX12TextureResource*> m_render_targets;
 };
 
 inline DX12PipelineState::Desc get_default_pipeline_state_desc()
@@ -356,6 +355,13 @@ inline DX12PipelineState::Desc get_default_pipeline_state_desc()
   return desc;
 }
 
+struct DX12PipelineInfo
+{
+  DX12PipelineState* m_pipeline = nullptr;
+  DynamicArray<DX12TextureResource*> m_render_targets;
+  DX12TextureResource* m_depth_stencil_target = nullptr;
+};
+
 // Handle command list lifecycle and barriers
 class DX12CommandContext
 {
@@ -394,12 +400,15 @@ public:
   void clear_depth_stencil_target(DX12TextureResource* target, f32 depth = 1.0f, u8 stencil = 0);
 
   // Pipeline state
-  void set_pipeline_state(DX12PipelineState* pipeline_state);
+  // void set_pipeline_state(DX12PipelineState* pipeline_state);
+  void set_pipeline(const DX12PipelineInfo& pipeline_info);
   void set_pipeline_resources(u32 space, DX12PipelineResourceSpace* resources);
   void set_vertex_buffer(const DX12BufferResource* vertex_buffer);
   void set_index_buffer(const DX12BufferResource* index_buffer);
 
   void set_primitive_topology(D3D12_PRIMITIVE_TOPOLOGY topology);
+
+  void resolve_msaa_render_target(DX12TextureResource* msaa_rt, DX12TextureResource* current_back_buffer);
 
   // Drawing
   void draw_indexed(u32 index_count, u32 start_index = 0, u32 base_vertex = 0);
@@ -482,7 +491,7 @@ private:
 class DX12State
 {
 public:
-  DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync = false);
+  DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync = false, bool msaa_enabled = false);
   ~DX12State();
 
   void flush_queues();
@@ -493,7 +502,9 @@ public:
   void present();
   void resize(u32 width, u32 height);
 
-  u32 get_frame_id() { return m_frame_index; }
+  u32 get_frame_id() const { return m_frame_index; }
+
+  DX12Descriptor& get_imgui_descriptor(u32 index) { return m_imgui_descriptors[index]; }
 
   // Context creation
   UniquePtr<DX12GraphicsCommandContext> create_graphics_context();
@@ -512,10 +523,13 @@ public:
   // Render target access
   DX12TextureResource* get_current_back_buffer() { return m_back_buffers[m_swap_chain->GetCurrentBackBufferIndex()].get(); }
   DX12TextureResource* get_depth_stencil_buffer() { return m_depth_stencil_buffer.get(); }
+  DX12TextureResource* get_msaa_render_target() { return m_msaa_render_target.get(); }
+
+  u32 get_msaa_quality_level() const { return m_msaa_quality_level; }
 
   UniquePtr<DX12BufferResource> create_buffer_resource(const DX12BufferResource::Desc& desc);
   UniquePtr<DX12TextureResource> create_texture_resource(const DX12TextureResource::Desc& desc);
-  UniquePtr<DX12TextureData> create_texture_data(const RawTextureData& raw_texture_data);
+  UniquePtr<DX12TextureData> create_texture_data(TextureAsset* texture_asset);
 
   void destroy_buffer_resource(UniquePtr<DX12BufferResource> buffer);
   void destroy_texture_resource(UniquePtr<DX12TextureResource> texture);
@@ -528,6 +542,7 @@ public:
 private:
   void update_render_target_views();
   void create_depth_stencil_buffer(u32 width, u32 height);
+  void create_msaa_render_target(u32 width, u32 height);
   void copy_srv_handle_to_reserved_table(DX12Descriptor srv_handle, u32 index);
   void process_destructions(u32 frame_index);
 
@@ -559,6 +574,7 @@ private:
   UniquePtr<DX12StagingDescriptorHeap> m_rtv_staging_descriptor_heap;
   UniquePtr<DX12StagingDescriptorHeap> m_dsv_staging_descriptor_heap;
   UniquePtr<DX12StagingDescriptorHeap> m_srv_staging_descriptor_heap;
+  StaticArray<DX12Descriptor, k_num_frames_in_flight> m_imgui_descriptors;
   DynamicArray<u32> m_free_reserved_descriptor_indices;
   StaticArray<UniquePtr<DX12RenderPassDescriptorHeap>, k_num_frames_in_flight> m_srv_render_pass_descriptor_heaps;
 
@@ -566,10 +582,13 @@ private:
   StaticArray<UniquePtr<DX12TextureResource>, k_num_back_buffers> m_back_buffers;
 
   UniquePtr<DX12TextureResource> m_depth_stencil_buffer{ nullptr };
-  
+  UniquePtr<DX12TextureResource> m_msaa_render_target{ nullptr };
+
   // State
   bool m_vsync;
   bool m_tearing_supported;
+  bool m_msaa_enabled;
+  u32 m_msaa_quality_level;
 
   struct DX12DestructionQueue
   {
