@@ -11,13 +11,13 @@
 
 struct TextureLoadInfo;
 
-enum class AssetState : u8
-{
-    Unloaded,
-    Queued,
-    Loaded,
-    Locked,
-};
+// enum class AssetState : u8
+// {
+//     Unloaded,
+//     // Queued,  // TODO: Remove? Currently not relevent because we have inflight texture cache
+//     Loaded,
+//     Locked,
+// };
 
 enum class AssetType : u8
 {
@@ -82,9 +82,9 @@ struct std::hash<AssetId>
 struct Asset
 {
     AssetId m_id;
-    AssetState m_state = AssetState::Unloaded;
+    // AssetState m_state = AssetState::Unloaded;
     AssetType m_type;
-    u16 m_ref_count = 0;
+    // u16 m_ref_count = 0;
     // u32 m_size = 0;
     // u8* m_data = nullptr;
     // TODO: FileHandle m_file_handle;
@@ -224,9 +224,11 @@ namespace Assets
     void initialize();
     void shutdown();
 
+    void load_texture_asset_async(const AssetId& id);
     void load_texture_asset(const AssetId& id);
     TextureAsset* get_texture_asset(const AssetId& id);
 
+    // void load_model_asset_async(const AssetId& id);
     void load_model_asset(const AssetId& id);
     ModelAsset* get_model_asset(const AssetId& id);
 

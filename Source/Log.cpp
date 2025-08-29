@@ -153,6 +153,8 @@ LogManager::ErrorDialogResult LogManager::error(const String& error_message, Opt
   // show the dialog box
   int result = ::MessageBoxA(NULL, buffer.c_str(), is_fatal ? "FATAL" : "ERROR", MB_ABORTRETRYIGNORE|MB_ICONERROR|MB_DEFBUTTON3);
 
+  // TODO: This is broken when not attached to a debugger!!!
+
 	// act upon the choice
 	switch (result)
 	{

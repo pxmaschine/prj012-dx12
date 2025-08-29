@@ -3,6 +3,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <ThirdParty/stb/stb_image.h>
 
+#include <Platform/Platform.h>
+#include <Platform/Jobs.h>
+
 #include <Platform/PlatformContext.h>
 #if ZV_COMPILER_CL
 #pragma warning(disable: 4996)  // This function or variable may be unsafe
@@ -14,8 +17,15 @@
 
 #include <AssetTable.cpp>
 
+#include <unordered_set>
+
 namespace { class AssetManager; }
 static UniquePtr<AssetManager> s_asset_manager{ nullptr };
+
+// // stb_image has a thread-local version of the flip flag.
+// // If your stb version doesn't have this, either always load unflipped and
+// // manually flip the pixels, or ensure all threads use the same setting.
+// extern "C" void stbi_set_flip_vertically_on_load_thread(int flag);
 
 namespace
 {
@@ -255,6 +265,7 @@ namespace
                 vtx[i].tangent.x = tmp[0];
                 vtx[i].tangent.y = tmp[1];
                 vtx[i].tangent.z = tmp[2];
+                vtx[i].tangent.w = tmp[3];
                 if (is_left_handed_coordinate_system)
                 {
                     vtx[i].tangent = basis_flip_y(vtx[i].tangent);
@@ -263,6 +274,7 @@ namespace
             else
             {
                 vtx[i].tangent.x = 1.0f; vtx[i].tangent.y = 0.0f; vtx[i].tangent.z = 0.0f;
+                vtx[i].tangent.w = 1.0f;
             }
         }
     }
@@ -365,16 +377,35 @@ namespace
         }
     }
 
+    // inline AssetState get_asset_state(Asset* asset)
+    // {
+    //     return asset->m_state.load(std::memory_order_acquire);
+    // }
+
     class AssetManager : public Singleton<AssetManager>
     {
     private:
         HashMap<AssetId, TextureAsset> m_texture_assets;
         HashMap<AssetId, ModelAsset> m_model_assets;
 
+        Mutex m_tex_mutex;
+        HashSet<AssetId> m_tex_inflight;
+    
+        struct TextureLoadJob
+        {
+            AssetManager* manager;
+            AssetId id;
+            bool flip_vertically;
+        };
+    
+        static void load_texture_asset_job(JobQueue* queue, void* data);
+
     public:
         AssetManager() : BaseType(this) {}
 
-        void load_texture_asset(const AssetId& id, bool flip_vertically = false);
+        // void load_texture_asset_async(const AssetId& id, bool flip_vertically);
+
+        void load_texture_asset_async(const AssetId& id, bool flip_vertically = false);
         TextureAsset* get_texture_asset(const AssetId& id);
 
         void load_model_asset(const AssetId& id);
@@ -385,62 +416,151 @@ namespace
         ModelLoadInfo get_model_load_info(const AssetId& id) const;
     };
 
-    void AssetManager::load_texture_asset(const AssetId& id, bool flip_vertically)
-    {
-        zv_assert_msg(id.is_valid(), "Invalid asset id passed to load_texture_asset");
+    // void AssetManager::load_texture_asset_async(const AssetId& id, bool flip_vertically)
+    // {
+    //     zv_assert_msg(id.is_valid(), "Invalid asset id passed to load_texture_asset_async");
 
-        if (m_texture_assets.find(id) != m_texture_assets.end())
+    //     if (m_texture_assets.find(id) != m_texture_assets.end())
+    //     {
+    //         return;
+    //     }
+
+    //     TextureLoadInfo load_info = get_texture_load_info(id);
+
+    //     stbi_set_flip_vertically_on_load(flip_vertically);
+
+    //     s32 width = 0;
+    //     s32 height = 0;
+    //     s32 original_channels = 0;
+    //     u8* data = stbi_load(load_info.m_path, &width, &height, &original_channels, load_info.m_request_channels);
+    //     u32 total_size = width * height * load_info.m_request_channels;
+
+    //     zv_assert_msg(data != nullptr, "Failed to load texture file: {}", load_info.m_path);
+    
+    //     if (original_channels != load_info.m_request_channels)
+    //     {
+    //         zv_warning("Original channels ({}) != request channels ({}) for texture {}", original_channels, load_info.m_request_channels, load_info.m_path);
+    //     }
+
+    //     TextureAsset asset{};
+    //     asset.m_state = AssetState::Loaded;
+    //     asset.m_id = id;
+    //     asset.m_width = width;
+    //     asset.m_height = height;
+    //     asset.m_num_channels = load_info.m_request_channels;
+    //     asset.m_data = make_unique_ptr<u8[]>(total_size);
+    //     asset.m_dimension = TextureDimension::Texture2D;
+    //     asset.m_format = load_info.m_format;
+    
+    //     memcpy(asset.m_data.get(), data, total_size);
+    //     stbi_image_free(data);
+
+    //     m_texture_assets.emplace(id, move_ptr(asset));
+    // }
+
+    void AssetManager::load_texture_asset_job(JobQueue*, void* data)
+    {
+        UniquePtr<TextureLoadJob> job(static_cast<TextureLoadJob*>(data)); // auto-delete
+        AssetManager* manager = job->manager;
+        const AssetId id   = job->id;
+
+        // Gather info (safe; pure read)
+        TextureLoadInfo load_info = manager->get_texture_load_info(id);
+
+        stbi_set_flip_vertically_on_load_thread(job->flip_vertically ? 1 : 0);
+
+        s32 width = 0, height = 0, original_channels = 0;
+        u8* pixels = stbi_load(load_info.m_path, &width, &height,
+                                        &original_channels, load_info.m_request_channels);
+        if (!pixels)
         {
+            zv_error("Failed to load texture file: {}", load_info.m_path);
+            // Clear inflight so a future call can retry
+            ScopedLock lock(manager->m_tex_mutex);
+            manager->m_tex_inflight.erase(id);
             return;
         }
 
-        TextureLoadInfo load_info = get_texture_load_info(id);
+        const u32 total_size = static_cast<u32>(width) *
+                               static_cast<u32>(height) *
+                               static_cast<u32>(load_info.m_request_channels);
 
-        stbi_set_flip_vertically_on_load(flip_vertically);
-
-        s32 width = 0;
-        s32 height = 0;
-        s32 original_channels = 0;
-        u8* data = stbi_load(load_info.m_path, &width, &height, &original_channels, load_info.m_request_channels);
-        u32 total_size = width * height * load_info.m_request_channels;
-
-        zv_assert_msg(data != nullptr, "Failed to load texture file: {}", load_info.m_path);
-    
         if (original_channels != load_info.m_request_channels)
         {
-            zv_warning("Original channels ({}) != request channels ({}) for texture {}", original_channels, load_info.m_request_channels, load_info.m_path);
+            // TODO
+            // zv_warning("Original channels ({}) != request channels ({}) for texture {}",
+            //         original_channels, load_info.m_request_channels, load_info.m_path);
         }
 
+        // Build the asset off-thread, no locks held
         TextureAsset asset{};
-        asset.m_state = AssetState::Loaded;
-        asset.m_id = id;
-        asset.m_width = width;
-        asset.m_height = height;
-        asset.m_num_channels = load_info.m_request_channels;
-        asset.m_data = make_unique_ptr<u8[]>(total_size);
-        asset.m_dimension = TextureDimension::Texture2D;
-        asset.m_format = load_info.m_format;
-    
-        memcpy(asset.m_data.get(), data, total_size);
-        stbi_image_free(data);
+        // asset.m_state         = AssetState::Loaded;
+        asset.m_id            = id;
+        asset.m_width         = width;
+        asset.m_height        = height;
+        asset.m_num_channels  = load_info.m_request_channels;
+        asset.m_data          = make_unique_ptr<u8[]>(total_size);
+        asset.m_dimension     = TextureDimension::Texture2D;
+        asset.m_format        = load_info.m_format;
 
-        m_texture_assets.emplace(id, move_ptr(asset));
+        memcpy(asset.m_data.get(), pixels, total_size);
+        stbi_image_free(pixels);
+
+        // Publish under the mutex
+        {
+            ScopedLock lock(manager->m_tex_mutex);
+
+            // Another thread might have synchronously loaded it meanwhile
+            if (manager->m_texture_assets.find(id) == manager->m_texture_assets.end())
+            {
+                manager->m_texture_assets.emplace(id, move_ptr(asset));
+            }
+
+            manager->m_tex_inflight.erase(id);
+        }
+    }
+
+    void AssetManager::load_texture_asset_async(const AssetId& id, bool flip_vertically)
+    {
+        zv_assert_msg(id.is_valid(), "Invalid asset id passed to load_texture_asset_async");
+
+        {
+            ScopedLock lock (m_tex_mutex);
+
+            if (m_texture_assets.find(id) != m_texture_assets.end())
+            {
+                return;
+            }
+            
+            if (!m_tex_inflight.insert(id).second)
+            {
+                return; // already queued
+            }
+        }
+
+        // Allocate a tiny job record; worker deletes it when done.
+        auto* job = new TextureLoadJob{ this, id, flip_vertically };
+        Platform::add_job(JobPriority::High, &AssetManager::load_texture_asset_job, job);
     }
 
     TextureAsset* AssetManager::get_texture_asset(const AssetId& id)
     {
         if (!id.is_valid())
         {
-            zv_warning("Invalid asset id passed to get_texture_asset");
+            zv_error("Invalid asset id passed to get_texture_asset");
             return nullptr;
         }
+
+        ScopedLock lock(m_tex_mutex);
 
         auto it = m_texture_assets.find(id);
         if (it == m_texture_assets.end())
         {
-            zv_warning("Asset not found in texture assets map");
+            // TODO
+            // zv_warning("Asset not found in texture assets map");
             return nullptr;
         }
+
         return &it->second;
     }
 
@@ -484,7 +604,7 @@ namespace
         cgltf_parse_model_data(load_info, &data->scenes[0], &asset);
         cgltf_free(data);
 
-        asset.m_state = AssetState::Loaded;
+        // asset.m_state = AssetState::Loaded;
 
         m_model_assets.emplace(id, move_ptr(asset));
     }
@@ -530,10 +650,19 @@ void Assets::shutdown()
     s_asset_manager = nullptr;
 }
 
+void Assets::load_texture_asset_async(const AssetId& id)
+{
+    zv_assert_msg(s_asset_manager != nullptr, "Asset manager not initialized!");
+    s_asset_manager->load_texture_asset_async(id);
+}
+
 void Assets::load_texture_asset(const AssetId& id)
 {
     zv_assert_msg(s_asset_manager != nullptr, "Asset manager not initialized!");
-    s_asset_manager->load_texture_asset(id);
+
+    s_asset_manager->load_texture_asset_async(id);
+
+    Platform::complete_all_jobs(JobPriority::High);
 }
 
 TextureAsset* Assets::get_texture_asset(const AssetId& id)

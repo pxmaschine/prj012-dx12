@@ -6,7 +6,8 @@ set(HEADER_FILES
   MathLib.h
   BitFlags.h
   Platform/Input.h
-  Platform/Application.h
+  Platform/Jobs.h
+  Platform/Platform.h
   Platform/PlatformContext.h
   Platform/Win32/Win32Platform.h
   Platform/DX12/DX12.h
@@ -21,7 +22,8 @@ set(HEADER_FILES
 
 set(SOURCE_FILES
   Asset.cpp
-  Platform/Application.cpp
+  Platform/Jobs.cpp
+  Platform/Platform.cpp
   Platform/Win32/Win32Main.cpp
   Platform/Win32/Win32Platform.cpp
   Platform/DX12/DX12.cpp

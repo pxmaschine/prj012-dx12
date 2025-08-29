@@ -5,6 +5,7 @@
 #include <array>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <mutex>
 #include <algorithm>
@@ -63,6 +64,9 @@ using StaticArray = std::array<T, Size>;
 
 template <typename T, typename Allocator = std::allocator<T>>
 using HashMap = std::unordered_map<T, Allocator>;
+
+template <typename T, typename Hash = std::hash<T>, typename KeyEqual = std::equal_to<T>, typename Allocator = std::allocator<T>>
+using HashSet = std::unordered_set<T, Hash, KeyEqual, Allocator>;
 
 template <typename T, typename Allocator = std::allocator<T>>
 using Queue = std::queue<T, Allocator>;

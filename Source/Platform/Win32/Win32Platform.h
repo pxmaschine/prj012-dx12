@@ -1,6 +1,8 @@
 #pragma once
 
+#include <Log.h>
 #include <Windows.h>
+#include <Platform/Jobs.h>
 
 #include <CoreDefs.h>
 
@@ -26,11 +28,14 @@ struct Win32State
     
     Win32Window m_window;
      
-    u32 m_client_width = 1280;  // TODO: What is this?
-    u32 m_client_height = 720;  // TODO: What is this?
+    u32 m_client_width = 1280;
+    u32 m_client_height = 720;
+
+    JobQueue m_high_priority_queue;
+    JobQueue m_low_priority_queue;
 };
 
-Win32State win32_create_state(HINSTANCE instance, const wchar_t* window_title, u32 width, u32 height);
+void win32_create_state(Win32State* state, HINSTANCE instance, const wchar_t* window_title, u32 width, u32 height, u32 thread_count);
 LARGE_INTEGER win32_get_wall_clock(void);
 f32 win32_get_seconds_elapsed(LARGE_INTEGER start, LARGE_INTEGER end, s64 perf_count_frequency);
 void win32_process_pending_messages(InputState* input_state);
@@ -52,4 +57,11 @@ inline f32 win32_get_seconds_elapsed(LARGE_INTEGER start, LARGE_INTEGER end, s64
     f32 result = ((f32)(end.QuadPart - start.QuadPart) /
                   (f32)perf_count_frequency);
     return(result);
+}
+
+inline u32 win32_get_cpu_core_count(void)
+{
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    return (u32)info.dwNumberOfProcessors;
 }

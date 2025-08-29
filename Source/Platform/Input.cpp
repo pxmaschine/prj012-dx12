@@ -1,6 +1,6 @@
 #include <Platform/Input.h>
 
-#include <Platform/Application.h>
+#include <Platform/Platform.h>
 #include <Platform/Win32/Win32Platform.h>
 #include <Utility.h>
 
@@ -68,13 +68,13 @@ namespace
     m_current_frame_input = &m_input_states[0];
     m_previous_frame_input = &m_input_states[1];
 
-    m_window_handle = Application::get().get_window()->m_window_handle;
+    m_window_handle = Platform::window_get_handle();
 
     POINT mouse_p;
     GetCursorPos(&mouse_p);
     ScreenToClient(m_window_handle, &mouse_p);
     m_previous_frame_input->m_mouse.m_position.x = (f32)mouse_p.x;
-    m_previous_frame_input->m_mouse.m_position.y = (f32)((Application::get().get_client_height() - 1) - mouse_p.y);
+    m_previous_frame_input->m_mouse.m_position.y = (f32)((Platform::window_get_client_height() - 1) - mouse_p.y);
   }
 
   void InputManager::reset_current_input_state()
@@ -134,8 +134,8 @@ namespace
 
     if (m_settings.m_is_mouse_captured)
     {
-      s32 x_client = (s32)(Application::get().get_client_width() * 0.5f);
-      s32 y_client = (s32)(Application::get().get_client_height() * 0.5f);
+      s32 x_client = (s32)(Platform::window_get_client_width() * 0.5f);
+      s32 y_client = (s32)(Platform::window_get_client_height() * 0.5f);
 
       m_previous_frame_input->m_mouse.m_position = { (f32)x_client, (f32)y_client };
     }
@@ -148,7 +148,7 @@ namespace
       ScreenToClient(m_window_handle, &mouse_p);
       // TODO: Clip space?
       m_current_frame_input->m_mouse.m_position.x = (f32)mouse_p.x;
-      m_current_frame_input->m_mouse.m_position.y = (f32)((Application::get().get_client_height() - 1) - mouse_p.y);  // TODO: backbuffer height (1080)
+      m_current_frame_input->m_mouse.m_position.y = (f32)((Platform::window_get_client_height() - 1) - mouse_p.y);  // TODO: backbuffer height (1080)
       m_current_frame_input->m_mouse.m_scroll_delta.x = 0;  // TODO: Support mousewheel?
       m_current_frame_input->m_mouse.m_scroll_delta.y = 0;  // TODO: Support mousewheel?
     
@@ -176,8 +176,8 @@ namespace
 
     if (m_settings.m_is_mouse_captured)
     {
-      s32 x_client = (s32)(Application::get().get_client_width() * 0.5f);
-      s32 y_client = (s32)(Application::get().get_client_height() * 0.5f);
+      s32 x_client = (s32)(Platform::window_get_client_width() * 0.5f);
+      s32 y_client = (s32)(Platform::window_get_client_height() * 0.5f);
       win32_set_cursor_position(x_client, y_client);
     }
   }
@@ -305,31 +305,37 @@ void ZV::Input::update()
 
 void ZV::Input::set_mouse_sensitivity(f32 sensitivity)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   s_input_manager->set_mouse_sensitivity(sensitivity);
 }
 
 f32 ZV::Input::get_mouse_sensitivity()
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->get_mouse_sensitivity();
 }
 
 void ZV::Input::set_mouse_captured(bool is_captured)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   s_input_manager->set_mouse_captured(is_captured);
 }
 
 bool ZV::Input::is_mouse_captured()
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_mouse_captured();
 }
 
 void ZV::Input::set_camera_speed(f32 speed)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   s_input_manager->set_camera_speed(speed);
 }
 
 f32 ZV::Input::get_camera_speed()
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->get_camera_speed();
 }
 
@@ -337,75 +343,90 @@ f32 ZV::Input::get_camera_speed()
 
 bool ZV::Input::is_quit_requested()
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_quit_requested();
 }
 
 bool ZV::Input::is_key_down(KeyboardKeyWin32 key)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_key_down(key);
 }
 
 bool ZV::Input::is_key_up(KeyboardKeyWin32 key)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_key_up(key);
 }
 
 bool ZV::Input::was_key_pressed(KeyboardKeyWin32 key)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->was_key_pressed(key);
 }
 
 bool ZV::Input::was_key_released(KeyboardKeyWin32 key)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->was_key_released(key);
 }
 
 bool ZV::Input::is_mouse_button_down(MouseButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_mouse_button_down(button);
 }
 
 bool ZV::Input::is_mouse_button_up(MouseButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_mouse_button_up(button);
 }
 
 bool ZV::Input::was_mouse_button_pressed(MouseButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->was_mouse_button_pressed(button);
 }
 
 bool ZV::Input::was_mouse_button_released(MouseButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->was_mouse_button_released(button);
 }
 
 Vector2 ZV::Input::get_mouse_delta()
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->get_mouse_delta();
 }
 
 Vector2 ZV::Input::get_mouse_position()
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->get_mouse_position();
 }
 
 bool ZV::Input::is_gamepad_button_down(GamepadButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_gamepad_button_down(button);
 }
 
 bool ZV::Input::is_gamepad_button_up(GamepadButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->is_gamepad_button_up(button);
 }
 
 bool ZV::Input::was_gamepad_button_pressed(GamepadButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->was_gamepad_button_pressed(button);
 }
 
 bool ZV::Input::was_gamepad_button_released(GamepadButtonWin32 button)
 {
+  zv_assert_msg(s_input_manager != nullptr, "Input manager not initialized!");
   return s_input_manager->was_gamepad_button_released(button);
 }

@@ -13,7 +13,7 @@
 #include <Geometry.h>
 #include <Rendering.h>
 #include <Platform/Input.h>
-#include <Platform/Application.h>
+#include <Platform/Platform.h>
 #include <Utility.h>
 
 #include <Log.h>
@@ -55,10 +55,6 @@ int CALLBACK WinMain(
 
   ZV::Log::initialize();
 
-  Assets::initialize();
-
-  Assets::load_texture_asset("dummy");
-
   // TODO: Remove DirectX Math library
   // Check for DirectX Math library support.
   if (!DirectX::XMVerifyCPUSupport())
@@ -67,7 +63,9 @@ int CALLBACK WinMain(
     return false;
   }
 
-  UniquePtr<Application> application = make_unique_ptr<Application>(hInstance, L"Hello World Window");
+  Assets::initialize();
+  const u32 thread_count = win32_get_cpu_core_count() - 1;
+  Platform::initialize(Platform::CreationInfo{ hInstance, L"ZEngine", 1280, 720, thread_count });
   
   ZV::Input::initialize();
 
@@ -86,7 +84,7 @@ int CALLBACK WinMain(
   Vector3 camera_position{};
   Quaternion camera_rotation{};
 
-  Renderer* renderer = Application::get().get_renderer();
+  Renderer* renderer = Platform::get_renderer();
 
   // Setup Renderer
   {
@@ -100,7 +98,7 @@ int CALLBACK WinMain(
 
     GlobalLight* global_light = renderer->create_global_light();
     global_light->direction = {0.0f, -1.0f, 0.0f, 1.0f};
-    global_light->intensity = 6.0f;
+    global_light->intensity = 3.0f;
     global_light->light_color = {1.0f, 1.0f, 1.0f};
   
     // PunctualLight* point_light = renderer->create_punctual_light();
@@ -122,95 +120,94 @@ int CALLBACK WinMain(
     Vector4 clear_color = {0.025f, 0.025f, 0.025f, 1.0f};
     renderer->set_clear_color(clear_color);
 
-    // DebugPrimitive* debug_primitive_grid = renderer->create_debug_primitive(geometry);
-    // debug_primitive_grid->m_material_info.m_albedo_texture_id = AssetId("grid_albedo");
-    // debug_primitive_grid->m_material_info.m_normal_texture_id = AssetId("grid_normal");
-    // debug_primitive_grid->m_material_info.m_metallic_roughness_texture_id = AssetId("grid_roughness");
-    // debug_primitive_grid->m_material_info.m_overlay_texture_id = AssetId("grid_overlay");
-    // debug_primitive_grid->m_material_info.m_channel_packing = ChannelPacking::Roughness;
-    // debug_primitive_grid->m_material_info.m_albedo_color = {1.0f, 0.533f, 0.153f};
-    // debug_primitive_grid->m_world_matrix = Matrix::CreateTranslation(0.0f, 0.0f, -2.5f);
-    // renderer->push_debug_primitive(debug_primitive_grid);
+    DebugPrimitive* debug_primitive_grid = renderer->create_debug_primitive(geometry);
+    debug_primitive_grid->m_material_info.m_albedo_texture_id = AssetId("grid_albedo");
+    debug_primitive_grid->m_material_info.m_normal_texture_id = AssetId("grid_normal");
+    debug_primitive_grid->m_material_info.m_metallic_roughness_texture_id = AssetId("grid_roughness");
+    debug_primitive_grid->m_material_info.m_overlay_texture_id = AssetId("grid_overlay");
+    debug_primitive_grid->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    debug_primitive_grid->m_material_info.m_albedo_color = {1.0f, 0.533f, 0.153f};
+    debug_primitive_grid->m_world_matrix = Matrix::CreateTranslation(0.0f, 0.0f, -2.5f);
+    renderer->push_debug_primitive(debug_primitive_grid);
 
-    // DebugPrimitive* debug_primitive_grid2 = renderer->create_debug_primitive(geometry);
-    // debug_primitive_grid2->m_material_info.m_albedo_texture_id = AssetId("grid_albedo");
-    // debug_primitive_grid2->m_material_info.m_normal_texture_id = AssetId("grid_normal");
-    // debug_primitive_grid2->m_material_info.m_metallic_roughness_texture_id = AssetId("grid_roughness");
-    // debug_primitive_grid2->m_material_info.m_overlay_texture_id = AssetId("grid_overlay");
-    // debug_primitive_grid2->m_material_info.m_channel_packing = ChannelPacking::Roughness;
-    // debug_primitive_grid2->m_material_info.m_albedo_color = { 0.145f, 0.631f, 1.0f };
-    // debug_primitive_grid2->m_world_matrix = Matrix::CreateTranslation(0.0f, 0.0f, -5.0f);
-    // renderer->push_debug_primitive(debug_primitive_grid2);
+    DebugPrimitive* debug_primitive_grid2 = renderer->create_debug_primitive(geometry);
+    debug_primitive_grid2->m_material_info.m_albedo_texture_id = AssetId("grid_albedo");
+    debug_primitive_grid2->m_material_info.m_normal_texture_id = AssetId("grid_normal");
+    debug_primitive_grid2->m_material_info.m_metallic_roughness_texture_id = AssetId("grid_roughness");
+    debug_primitive_grid2->m_material_info.m_overlay_texture_id = AssetId("grid_overlay");
+    debug_primitive_grid2->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    debug_primitive_grid2->m_material_info.m_albedo_color = { 0.145f, 0.631f, 1.0f };
+    debug_primitive_grid2->m_world_matrix = Matrix::CreateTranslation(0.0f, 0.0f, -5.0f);
+    renderer->push_debug_primitive(debug_primitive_grid2);
 
-    // DebugPrimitive* debug_primitive_mat_probe_brick_wall_low = renderer->create_debug_primitive(geometry2);
-    // debug_primitive_mat_probe_brick_wall_low->m_material_info.m_albedo_texture_id = AssetId("brick_wall_low_albedo");
-    // debug_primitive_mat_probe_brick_wall_low->m_material_info.m_normal_texture_id = AssetId("brick_wall_low_normal");
-    // debug_primitive_mat_probe_brick_wall_low->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, -2.5f);
-    // renderer->push_debug_primitive(debug_primitive_mat_probe_brick_wall_low);
+    DebugPrimitive* debug_primitive_mat_probe_brick_wall_low = renderer->create_debug_primitive(geometry2);
+    debug_primitive_mat_probe_brick_wall_low->m_material_info.m_albedo_texture_id = AssetId("brick_wall_low_albedo");
+    debug_primitive_mat_probe_brick_wall_low->m_material_info.m_normal_texture_id = AssetId("brick_wall_low_normal");
+    debug_primitive_mat_probe_brick_wall_low->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, -2.5f);
+    renderer->push_debug_primitive(debug_primitive_mat_probe_brick_wall_low);
 
-    // DebugPrimitive* debug_primitive_mat_probe_brick_wall = renderer->create_debug_primitive(geometry2);
-    // debug_primitive_mat_probe_brick_wall->m_material_info.m_albedo_texture_id = AssetId("brick_wall_albedo");
-    // debug_primitive_mat_probe_brick_wall->m_material_info.m_normal_texture_id = AssetId("brick_wall_normal");
-    // debug_primitive_mat_probe_brick_wall->m_material_info.m_metallic_roughness_texture_id = AssetId("brick_wall_roughness");
-    // debug_primitive_mat_probe_brick_wall->m_material_info.m_ao_texture_id = AssetId("brick_wall_ao");
-    // debug_primitive_mat_probe_brick_wall->m_material_info.m_specular_texture_id = AssetId("brick_wall_specular");
-    // debug_primitive_mat_probe_brick_wall->m_material_info.m_channel_packing = ChannelPacking::Roughness;
-    // debug_primitive_mat_probe_brick_wall->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, -2.5f);
-    // renderer->push_debug_primitive(debug_primitive_mat_probe_brick_wall);
+    DebugPrimitive* debug_primitive_mat_probe_brick_wall = renderer->create_debug_primitive(geometry2);
+    debug_primitive_mat_probe_brick_wall->m_material_info.m_albedo_texture_id = AssetId("brick_wall_albedo");
+    debug_primitive_mat_probe_brick_wall->m_material_info.m_normal_texture_id = AssetId("brick_wall_normal");
+    debug_primitive_mat_probe_brick_wall->m_material_info.m_metallic_roughness_texture_id = AssetId("brick_wall_roughness");
+    debug_primitive_mat_probe_brick_wall->m_material_info.m_ao_texture_id = AssetId("brick_wall_ao");
+    debug_primitive_mat_probe_brick_wall->m_material_info.m_specular_texture_id = AssetId("brick_wall_specular");
+    debug_primitive_mat_probe_brick_wall->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    debug_primitive_mat_probe_brick_wall->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, -2.5f);
+    renderer->push_debug_primitive(debug_primitive_mat_probe_brick_wall);
 
-    // DebugPrimitive* debug_primitive_mat_probe_metal_sheet = renderer->create_debug_primitive(geometry2);
-    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_albedo_texture_id = AssetId("metal_sheet_albedo");
-    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_normal_texture_id = AssetId("metal_sheet_normal");
-    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_metallic_roughness_texture_id = AssetId("metal_sheet_metalRoughness");
-    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_specular_texture_id = AssetId("metal_sheet_specular");
-    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_ao_texture_id = AssetId("metal_sheet_ao");
-    // debug_primitive_mat_probe_metal_sheet->m_material_info.m_channel_packing = ChannelPacking::Roughness | ChannelPacking::Metalness;
-    // debug_primitive_mat_probe_metal_sheet->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, 0.0f);
-    // renderer->push_debug_primitive(debug_primitive_mat_probe_metal_sheet);
+    DebugPrimitive* debug_primitive_mat_probe_metal_sheet = renderer->create_debug_primitive(geometry2);
+    debug_primitive_mat_probe_metal_sheet->m_material_info.m_albedo_texture_id = AssetId("metal_sheet_albedo");
+    debug_primitive_mat_probe_metal_sheet->m_material_info.m_normal_texture_id = AssetId("metal_sheet_normal");
+    debug_primitive_mat_probe_metal_sheet->m_material_info.m_metallic_roughness_texture_id = AssetId("metal_sheet_metalRoughness");
+    debug_primitive_mat_probe_metal_sheet->m_material_info.m_specular_texture_id = AssetId("metal_sheet_specular");
+    debug_primitive_mat_probe_metal_sheet->m_material_info.m_ao_texture_id = AssetId("metal_sheet_ao");
+    debug_primitive_mat_probe_metal_sheet->m_material_info.m_channel_packing = ChannelPacking::Roughness | ChannelPacking::Metalness;
+    debug_primitive_mat_probe_metal_sheet->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, 0.0f);
+    renderer->push_debug_primitive(debug_primitive_mat_probe_metal_sheet);
 
-    // DebugPrimitive* debug_primitive_mat_probe_planks = renderer->create_debug_primitive(geometry2);
-    // debug_primitive_mat_probe_planks->m_material_info.m_albedo_texture_id = AssetId("planks_albedo");
-    // debug_primitive_mat_probe_planks->m_material_info.m_normal_texture_id = AssetId("planks_normal");
-    // debug_primitive_mat_probe_planks->m_material_info.m_metallic_roughness_texture_id = AssetId("planks_roughness");
-    // debug_primitive_mat_probe_planks->m_material_info.m_specular_texture_id = AssetId("planks_specular");
-    // debug_primitive_mat_probe_planks->m_material_info.m_ao_texture_id = AssetId("planks_ao");
-    // debug_primitive_mat_probe_planks->m_material_info.m_channel_packing = ChannelPacking::Roughness;
-    // debug_primitive_mat_probe_planks->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, 0.0f);
-    // renderer->push_debug_primitive(debug_primitive_mat_probe_planks);
+    DebugPrimitive* debug_primitive_mat_probe_planks = renderer->create_debug_primitive(geometry2);
+    debug_primitive_mat_probe_planks->m_material_info.m_albedo_texture_id = AssetId("planks_albedo");
+    debug_primitive_mat_probe_planks->m_material_info.m_normal_texture_id = AssetId("planks_normal");
+    debug_primitive_mat_probe_planks->m_material_info.m_metallic_roughness_texture_id = AssetId("planks_roughness");
+    debug_primitive_mat_probe_planks->m_material_info.m_specular_texture_id = AssetId("planks_specular");
+    debug_primitive_mat_probe_planks->m_material_info.m_ao_texture_id = AssetId("planks_ao");
+    debug_primitive_mat_probe_planks->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    debug_primitive_mat_probe_planks->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, 0.0f);
+    renderer->push_debug_primitive(debug_primitive_mat_probe_planks);
 
-    // DebugPrimitive* debug_primitive_mat_probe_tiles = renderer->create_debug_primitive(geometry2);
-    // debug_primitive_mat_probe_tiles->m_material_info.m_albedo_texture_id = AssetId("tiles_albedo");
-    // debug_primitive_mat_probe_tiles->m_material_info.m_normal_texture_id = AssetId("tiles_normal");
-    // debug_primitive_mat_probe_tiles->m_material_info.m_metallic_roughness_texture_id = AssetId("tiles_roughness");
-    // debug_primitive_mat_probe_tiles->m_material_info.m_specular_texture_id = AssetId("tiles_specular");
-    // debug_primitive_mat_probe_tiles->m_material_info.m_ao_texture_id = AssetId("tiles_ao");
-    // debug_primitive_mat_probe_tiles->m_material_info.m_channel_packing = ChannelPacking::Roughness;
-    // debug_primitive_mat_probe_tiles->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, 2.5f);
-    // renderer->push_debug_primitive(debug_primitive_mat_probe_tiles);
+    DebugPrimitive* debug_primitive_mat_probe_tiles = renderer->create_debug_primitive(geometry2);
+    debug_primitive_mat_probe_tiles->m_material_info.m_albedo_texture_id = AssetId("tiles_albedo");
+    debug_primitive_mat_probe_tiles->m_material_info.m_normal_texture_id = AssetId("tiles_normal");
+    debug_primitive_mat_probe_tiles->m_material_info.m_metallic_roughness_texture_id = AssetId("tiles_roughness");
+    debug_primitive_mat_probe_tiles->m_material_info.m_specular_texture_id = AssetId("tiles_specular");
+    debug_primitive_mat_probe_tiles->m_material_info.m_ao_texture_id = AssetId("tiles_ao");
+    debug_primitive_mat_probe_tiles->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    debug_primitive_mat_probe_tiles->m_world_matrix = Matrix::CreateTranslation(-2.5f, 0.0f, 2.5f);
+    renderer->push_debug_primitive(debug_primitive_mat_probe_tiles);
 
-    // DebugPrimitive* debug_primitive_mat_probe_wood = renderer->create_debug_primitive(geometry2);
-    // debug_primitive_mat_probe_wood->m_material_info.m_albedo_texture_id = AssetId("wood_albedo");
-    // debug_primitive_mat_probe_wood->m_material_info.m_normal_texture_id = AssetId("wood_normal");
-    // debug_primitive_mat_probe_wood->m_material_info.m_metallic_roughness_texture_id = AssetId("wood_roughness");
-    // debug_primitive_mat_probe_wood->m_material_info.m_specular_texture_id = AssetId("wood_specular");
-    // debug_primitive_mat_probe_wood->m_material_info.m_ao_texture_id = AssetId("wood_ao");
-    // debug_primitive_mat_probe_wood->m_material_info.m_channel_packing = ChannelPacking::Roughness;
-    // debug_primitive_mat_probe_wood->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, 2.5f);
-    // renderer->push_debug_primitive(debug_primitive_mat_probe_wood);
+    DebugPrimitive* debug_primitive_mat_probe_wood = renderer->create_debug_primitive(geometry2);
+    debug_primitive_mat_probe_wood->m_material_info.m_albedo_texture_id = AssetId("wood_albedo");
+    debug_primitive_mat_probe_wood->m_material_info.m_normal_texture_id = AssetId("wood_normal");
+    debug_primitive_mat_probe_wood->m_material_info.m_metallic_roughness_texture_id = AssetId("wood_roughness");
+    debug_primitive_mat_probe_wood->m_material_info.m_specular_texture_id = AssetId("wood_specular");
+    debug_primitive_mat_probe_wood->m_material_info.m_ao_texture_id = AssetId("wood_ao");
+    debug_primitive_mat_probe_wood->m_material_info.m_channel_packing = ChannelPacking::Roughness;
+    debug_primitive_mat_probe_wood->m_world_matrix = Matrix::CreateTranslation(2.5f, 0.0f, 2.5f);
+    renderer->push_debug_primitive(debug_primitive_mat_probe_wood);
 
-    // renderer->push_model("DamagedHelmet", Matrix::CreateTranslation(0.0f, 0.5f, 0.0f));
+    renderer->push_model("DamagedHelmet", Matrix::CreateTranslation(0.0f, 0.5f, 0.0f));
 
-    auto world_matrix_sponza = Matrix::CreateRotationX(ZV_PI) * Matrix::CreateRotationY(ZV_PI / 2.0f) * Matrix::CreateTranslation(0.0f, -16.0f, 32.0f);
+    auto world_matrix_sponza = Matrix::CreateRotationX(ZV_PI) * Matrix::CreateRotationY(ZV_PI / 2.0f) *  Matrix::CreateTranslation(0.0f, -16.0f, 32.0f);
     renderer->push_model("Sponza", world_matrix_sponza);
   }
 
   LARGE_INTEGER last_counter = win32_get_wall_clock();
   LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
 
-  Win32Window* window = Application::get().get_window();
-  // win32_toggle_fullscreen(window);
+  Platform::window_toggle_fullscreen();
 
-  HWND window_handle = window->m_window_handle;
+  HWND window_handle = Platform::window_get_handle();
   
   HDC renderer_dc = GetDC(window_handle);
   s32 monitor_refresh_hz = 60;
@@ -221,7 +218,7 @@ int CALLBACK WinMain(
   }
   f32 game_update_hz = (f32)(monitor_refresh_hz);
 
-  Application::get().set_running(true);
+  Platform::app_set_running(true);
 
   // ::ShowWindow(window_handle, SW_SHOWMAXIMIZED);
   ::ShowWindow(window_handle, SW_SHOW);
@@ -229,7 +226,7 @@ int CALLBACK WinMain(
   u32 expected_frames_per_update = 1;
   f32 target_seconds_per_frame = (f32)expected_frames_per_update / (f32)game_update_hz;
 
-  while (Application::get().is_running() && !ZV::Input::is_quit_requested())
+  while (Platform::app_is_running() && !ZV::Input::is_quit_requested())
   {
     ZV::Input::update();
 
@@ -237,7 +234,7 @@ int CALLBACK WinMain(
     renderer->process_previous_frame_loads();
     
     // TODO: Update Game
-    if (!Application::get().is_paused())
+    if (!Platform::app_is_paused())
     {
       static u64 frame_count = 0;
       static f64 total_time = 0.0;
@@ -324,7 +321,7 @@ int CALLBACK WinMain(
     }
 
     // TODO: Update Audio
-    if (!Application::get().is_paused())
+    if (!Platform::app_is_paused())
     {
     }
 
@@ -335,7 +332,7 @@ int CALLBACK WinMain(
       ImGui::Begin("Debug Settings");
 
       ImGui::Text(ZV::format("FPS: {}", 1.0 / target_seconds_per_frame).c_str());
-      ImGui::Text(ZV::format("Client size: {}, {}", Application::get().get_client_width(), Application::get().get_client_height()).c_str());
+      ImGui::Text(ZV::format("Client size: {}, {}", Platform::window_get_client_width(), Platform::window_get_client_height()).c_str());
 
       auto vm = g_camera->m_view_matrix;
       auto pm = g_camera->m_projection_matrix;
@@ -376,7 +373,7 @@ int CALLBACK WinMain(
     {
       g_camera->update_projection_matrix(
         3.14159f / 4.0f, 
-        (f32)Application::get().get_client_width() / (f32)Application::get().get_client_height()
+        (f32)Platform::window_get_client_width() / (f32)Platform::window_get_client_height()
       );
       g_camera->update_view_matrix(
         camera_position, 
@@ -390,7 +387,7 @@ int CALLBACK WinMain(
     // Frame display
     {
       // TODO: Handle this within Application
-      renderer->set_client_size(Application::get().get_client_width(), Application::get().get_client_height());
+      renderer->set_client_size(Platform::window_get_client_width(), Platform::window_get_client_height());
       renderer->render();
     }
 
@@ -398,7 +395,7 @@ int CALLBACK WinMain(
     flip_wall_clock = win32_get_wall_clock();
 
     LARGE_INTEGER end_counter = win32_get_wall_clock();
-    f32 measured_seconds_per_frame = win32_get_seconds_elapsed(last_counter, end_counter, Application::get().get_perf_count_frequency());
+    f32 measured_seconds_per_frame = win32_get_seconds_elapsed(last_counter, end_counter, Platform::app_get_perf_count_frequency());
     f32 exact_target_frames_per_update = measured_seconds_per_frame * (f32)monitor_refresh_hz;
     u32 new_expected_frames_per_update = round_f32_to_s32(exact_target_frames_per_update);
     expected_frames_per_update = new_expected_frames_per_update;

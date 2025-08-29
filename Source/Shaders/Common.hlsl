@@ -40,18 +40,16 @@ struct VertexShaderOutput
     float3 position_w : POSITION;
     float2 uv         : TEXCOORD0;
     float3 normal_w   : NORMAL0;
-    float3 tangent_w  : TANGENT0;
+    float4 tangent_w  : TANGENT0;
 };
 
-float3 normal_sample_to_world(float3 normal_sample, float3 normal_w, float3 tangent_w)
+float3 normal_sample_to_world(float3 normal_sample, float3 normal_w, float4 tangent_w)
 {
     float3 normal_t = 2.0f * normal_sample - 1.0f;
 
     float3 n = normal_w;
-    float3 t = normalize(tangent_w - dot(tangent_w, n) * n);
-    float3 b = cross(n, t);
-
-    // b = -b;
+    float3 t = normalize(tangent_w.xyz - dot(tangent_w.xyz, n) * n);
+    float3 b = cross(n, t) * tangent_w.w;
 
     float3x3 tbn = float3x3(t, b, n);
 

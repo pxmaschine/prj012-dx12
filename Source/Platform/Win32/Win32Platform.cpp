@@ -1,6 +1,6 @@
 #include <Platform/Win32/Win32Platform.h>
 
-#include <Platform/Application.h>
+#include <Platform/Platform.h>
 #include <Rendering.h>
 #include <Platform/DX12/DX12.h>
 #include <Platform/Input.h>
@@ -76,12 +76,12 @@ namespace
             }
             case WM_CLOSE:
             {
-                Application::get().set_running(false);
+                Platform::app_set_running(false);
                 break;
             }
             case WM_DESTROY:
             {
-                Application::get().set_running(false);
+                Platform::app_set_running(false);
                 break;
             }
             case WM_ACTIVATEAPP:
@@ -104,11 +104,11 @@ namespace
                 int width = client_rect.right - client_rect.left;
                 int height = client_rect.bottom - client_rect.top;
         
-                Renderer* renderer = Application::get().get_renderer();
+                Renderer* renderer = Platform::get_renderer();
                 DX12State* dx12_state = renderer->get_dx12_state();
         
                 // TODO: Move this to Application
-                if (Application::get().resize(width, height) && dx12_state)
+                if (Platform::window_resize(width, height) && dx12_state)
                 {
                     dx12_state->resize(width, height);
                 }
@@ -248,22 +248,24 @@ namespace
     }
 }
 
-Win32State win32_create_state(HINSTANCE instance, const wchar_t* window_title, u32 width, u32 height)
+void win32_create_state(Win32State* state, HINSTANCE instance, const wchar_t* window_title, u32 width, u32 height, u32 thread_count)
 {
-    Win32State state{};
-
     LARGE_INTEGER perf_count_frequency_result;
     QueryPerformanceFrequency(&perf_count_frequency_result);
-    state.m_perf_count_frequency = perf_count_frequency_result.QuadPart;
+    state->m_perf_count_frequency = perf_count_frequency_result.QuadPart;
 
-    win32_get_executable_file_name(&state);
-    win32_build_executable_path_file_name(&state, "data.txt", sizeof(state.m_exe_file_name), state.m_exe_file_name);
+    win32_get_executable_file_name(state);
+    win32_build_executable_path_file_name(state, "data.txt", sizeof(state->m_exe_file_name), state->m_exe_file_name);
 
-    state.m_window = win32_create_window(instance, window_title, width, height);
-    state.m_client_width = width;
-    state.m_client_height = height;
+    state->m_window = win32_create_window(instance, window_title, width, height);
+    state->m_client_width = width;
+    state->m_client_height = height;
 
-    return state;
+    if (thread_count > 0)
+    {
+        win32_create_job_queue(&state->m_high_priority_queue, thread_count);
+        win32_create_job_queue(&state->m_low_priority_queue, thread_count);
+    }
 }
 
 void win32_process_pending_messages(InputState* input_state)
@@ -323,10 +325,9 @@ void win32_process_pending_messages(InputState* input_state)
                         }
                         else if ((vk_code == VK_RETURN) && alt_key_was_down)
                         {
-                            Win32Window* window = Application::get().get_window();
-                            if (message.hwnd == window->m_window_handle)
+                            if (message.hwnd == Platform::window_get_handle())
                             {
-                                win32_toggle_fullscreen(window);
+                                Platform::window_toggle_fullscreen();
                             }
                         }
                     }
@@ -395,8 +396,8 @@ void win32_set_mouse_captured(bool is_captured)
         ShowCursor(false);
         SetCursor(NULL);
 
-        s32 x_client = (s32)(Application::get().get_client_width() * 0.5f);
-        s32 y_client = (s32)(Application::get().get_client_height() * 0.5f);
+        s32 x_client = (s32)(Platform::window_get_client_width() * 0.5f);
+        s32 y_client = (s32)(Platform::window_get_client_height() * 0.5f);
 
         win32_set_cursor_position(x_client, y_client);
     }
@@ -404,9 +405,9 @@ void win32_set_mouse_captured(bool is_captured)
 
 void win32_set_cursor_position(s32 x_client, s32 y_client)
 {
-    Win32Window* window = Application::get().get_window();
+    HWND window_handle = Platform::window_get_handle();
 
     POINT pos = { x_client, y_client };
-    ClientToScreen(window->m_window_handle, &pos);
+    ClientToScreen(window_handle, &pos);
     SetCursorPos(pos.x, pos.y - 1);
 }

@@ -264,3 +264,9 @@ inline Vector3 basis_flip_y(const Vector3& v)
 {
   return Vector3{ v.x, -v.y, v.z };
 }
+
+inline Vector4 basis_flip_y(const Vector4& v)
+{
+  return Vector4{ v.x, -v.y, v.z, v.w };
+}
+

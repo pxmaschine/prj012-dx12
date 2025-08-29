@@ -43,6 +43,14 @@ struct RenderObject
   u32 m_draw_count = 0;
 };
 
+struct RenderTexture
+{
+  UniquePtr<DX12TextureData> m_texture = nullptr;
+#if ZV_DEBUG
+  FixedSizeString<128> m_asset_name{};
+#endif
+};
+
 enum class MaterialFeature : u32
 {
   None = 0,
@@ -164,18 +172,18 @@ private:
   u32 m_client_width = 0;
   u32 m_client_height = 0;
   bool m_msaa_enabled = false;
-  DynamicArray<UniquePtr<DX12TextureData>> m_textures{};
+  DynamicArray<UniquePtr<RenderTexture>> m_textures{};
   DynamicArray<UniquePtr<RenderObject>> m_render_objects{};
   DynamicArray<UniquePtr<MaterialData>> m_material_data{};
 
   DynamicArray<UniquePtr<Camera>> m_cameras{};
   Camera* m_active_camera = nullptr;
 
-  DynamicArray<ModelLoadData> m_previous_pending_model_loads{};
-  DynamicArray<ModelLoadData> m_pending_model_loads{};
+  HashMap<AssetId, ModelLoadData> m_previous_pending_model_loads{};
+  HashMap<AssetId, ModelLoadData> m_pending_model_loads{};
 
-  DynamicArray<AssetId> m_previous_pending_texture_loads{};
-  DynamicArray<AssetId> m_pending_texture_loads{};
+  HashSet<AssetId> m_previous_pending_texture_loads{};
+  HashSet<AssetId> m_pending_texture_loads{};
 
   DynamicArray<UniquePtr<DebugPrimitive>> m_debug_primitives{};
   DynamicArray<DebugPrimitive*> m_previous_pending_debug_primitive_loads{};

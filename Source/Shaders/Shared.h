@@ -24,7 +24,7 @@ struct MeshVertex
     Vector3 position : POSITION;
     Vector2 uv       : TEXCOORD;
     Vector3 normal   : NORMAL;
-    Vector3 tangent  : TANGENT;
+    Vector4 tangent  : TANGENT;
 };
 
 #else
@@ -43,7 +43,7 @@ struct MeshVertex
     Vector3 position;
     Vector2 uv;
     Vector3 normal;
-    Vector3 tangent;
+    Vector4 tangent;
 };
 
 enum class PunctualLightType : u32

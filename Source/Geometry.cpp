@@ -51,7 +51,7 @@ namespace
         MeshVertex v;
         v.position = pos;
         v.normal = normal;
-        v.tangent = tangent;
+        v.tangent = Vector4(tangent.x, tangent.y, tangent.z, 1.0f);
         v.uv = tex;
 
         return v;
@@ -235,11 +235,11 @@ namespace
             f32 u = x / height + 0.5f;
             f32 v = z / height + 0.5f;
 
-            data.m_vertices.push_back({Vector3(x, y, z), Vector2(u, v), Vector3(0.0f, 1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)});
+            data.m_vertices.push_back({Vector3(x, y, z), Vector2(u, v), Vector3(0.0f, 1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
         }
 
         // Cap center vertex.
-        data.m_vertices.push_back({Vector3(0.0f, y, 0.0f), Vector2(0.5f, 0.5f), Vector3(0.0f, 1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)});
+        data.m_vertices.push_back({Vector3(0.0f, y, 0.0f), Vector2(0.5f, 0.5f), Vector3(0.0f, 1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
 
         // Index of center vertex.
         u32 center_index = static_cast<u32>(data.m_vertices.size() - 1);
@@ -276,11 +276,11 @@ namespace
             f32 u = x / height + 0.5f;
             f32 v = z / height + 0.5f;
 
-            data.m_vertices.push_back({Vector3(x, y, z), Vector2(u, v), Vector3(0.0f, -1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)});
+            data.m_vertices.push_back({Vector3(x, y, z), Vector2(u, v), Vector3(0.0f, -1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
         }
 
         // Cap center vertex.
-        data.m_vertices.push_back({Vector3(0.0f, y, 0.0f), Vector2(0.5f, 0.5f), Vector3(0.0f, -1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)});
+        data.m_vertices.push_back({Vector3(0.0f, y, 0.0f), Vector2(0.5f, 0.5f), Vector3(0.0f, -1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
 
         // Cache the index of center vertex.
         u32 center_index = static_cast<u32>(data.m_vertices.size() - 1);
@@ -321,6 +321,7 @@ namespace
                 v.tangent.x = -radius * ZV::sin(phi) * ZV::sin(theta);
                 v.tangent.y = 0.0f;
                 v.tangent.z = +radius * ZV::sin(phi) * ZV::cos(theta);
+                v.tangent.w = 1.0f;
                 v.tangent.Normalize();
 
                 Vector3 p = v.position - Vector3(0.0f, y_offset, 0.0f);
@@ -380,6 +381,7 @@ namespace
                 v.tangent.x = -radius * ZV::sin(phi) * ZV::sin(theta);
                 v.tangent.y = 0.0f;
                 v.tangent.z = +radius * ZV::sin(phi) * ZV::cos(theta);
+                v.tangent.w = 1.0f;
                 v.tangent.Normalize();
 
                 Vector3 p = v.position - Vector3(0.0f, y_offset, 0.0f);
@@ -423,9 +425,9 @@ SharedPtr<PrimitiveMeshGeometryData> create_triangle(Vector3 p1, Vector3 p2, Vec
     
     data->m_type = PrimitiveMeshGeometryData::Type::Triangle;
 
-    data->m_vertices.push_back({p1, Vector2(0.0f, 1.0f), Vector3(0.0f), Vector3(1.0f, 0.0f, 0.0f)});
-    data->m_vertices.push_back({p2, Vector2(0.5f, 0.0f), Vector3(0.0f), Vector3(1.0f, 0.0f, 0.0f)});
-    data->m_vertices.push_back({p3, Vector2(1.0f, 1.0f), Vector3(0.0f), Vector3(1.0f, 0.0f, 0.0f)});
+    data->m_vertices.push_back({p1, Vector2(0.0f, 1.0f), Vector3(0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
+    data->m_vertices.push_back({p2, Vector2(0.5f, 0.0f), Vector3(0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
+    data->m_vertices.push_back({p3, Vector2(1.0f, 1.0f), Vector3(0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
     
     data->m_indices.push_back(0);
     data->m_indices.push_back(1);
@@ -442,10 +444,10 @@ SharedPtr<PrimitiveMeshGeometryData> create_quad(f32 width, f32 height)
 
     data->m_type = PrimitiveMeshGeometryData::Type::Quad;
 
-    data->m_vertices.push_back({Vector3(-width / 2.0f, -height / 2.0f, 0.0f), Vector2(0.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f)});
-    data->m_vertices.push_back({Vector3(-width / 2.0f, height / 2.0f, 0.0f), Vector2(0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f)});
-    data->m_vertices.push_back({Vector3(width / 2.0f, height / 2.0f, 0.0f), Vector2(1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f)});
-    data->m_vertices.push_back({Vector3(width / 2.0f, -height / 2.0f, 0.0f), Vector2(1.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f)});
+    data->m_vertices.push_back({Vector3(-width / 2.0f, -height / 2.0f, 0.0f), Vector2(0.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
+    data->m_vertices.push_back({Vector3(-width / 2.0f, height / 2.0f, 0.0f), Vector2(0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
+    data->m_vertices.push_back({Vector3(width / 2.0f, height / 2.0f, 0.0f), Vector2(1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
+    data->m_vertices.push_back({Vector3(width / 2.0f, -height / 2.0f, 0.0f), Vector2(1.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)});
 
     data->m_indices.push_back(0);
     data->m_indices.push_back(1);
@@ -494,7 +496,7 @@ SharedPtr<PrimitiveMeshGeometryData> create_plane(f32 width, f32 height, u32 wid
 
 			data->m_vertices[i * n + j].position = Vector3(x, 0.0f, z);
 			data->m_vertices[i * n + j].normal   = Vector3(0.0f, 1.0f, 0.0f);
-			data->m_vertices[i * n + j].tangent  = Vector3(1.0f, 0.0f, 0.0f);
+			data->m_vertices[i * n + j].tangent  = Vector4(1.0f, 0.0f, 0.0f, 1.0f);
 
 			// Stretch texture over grid.
 			data->m_vertices[i * n + j].uv.x = j * du;
@@ -544,40 +546,40 @@ SharedPtr<PrimitiveMeshGeometryData> create_box(f32 width, f32 height, f32 depth
 	f32 d2 = 0.5f * depth;
     
 	// Fill in the front face vertex data.
-	v[0] = {Vector3(-w2, -h2, -d2), Vector2(0.0f, 1.0f), Vector3(0.0f, 0.0f, -1.0f), Vector3(1.0f, 0.0f, 0.0f)};
-	v[1] = {Vector3(-w2, +h2, -d2), Vector2(0.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f), Vector3(1.0f, 0.0f, 0.0f)};
-	v[2] = {Vector3(+w2, +h2, -d2), Vector2(1.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f), Vector3(1.0f, 0.0f, 0.0f)};
-	v[3] = {Vector3(+w2, -h2, -d2), Vector2(1.0f, 1.0f), Vector3(0.0f, 0.0f, -1.0f), Vector3(1.0f, 0.0f, 0.0f)};
+	v[0] = {Vector3(-w2, -h2, -d2), Vector2(0.0f, 1.0f), Vector3(0.0f, 0.0f, -1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
+	v[1] = {Vector3(-w2, +h2, -d2), Vector2(0.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
+	v[2] = {Vector3(+w2, +h2, -d2), Vector2(1.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
+	v[3] = {Vector3(+w2, -h2, -d2), Vector2(1.0f, 1.0f), Vector3(0.0f, 0.0f, -1.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
 
 	// Fill in the back face vertex data.
-	v[4] = {Vector3(-w2, -h2, +d2), Vector2(0.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f)};
-	v[5] = {Vector3(+w2, -h2, +d2), Vector2(0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f)};
-	v[6] = {Vector3(+w2, +h2, +d2), Vector2(1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f)};
-	v[7] = {Vector3(-w2, +h2, +d2), Vector2(1.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f)};
+	v[4] = {Vector3(-w2, -h2, +d2), Vector2(0.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
+	v[5] = {Vector3(+w2, -h2, +d2), Vector2(0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
+	v[6] = {Vector3(+w2, +h2, +d2), Vector2(1.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
+	v[7] = {Vector3(-w2, +h2, +d2), Vector2(1.0f, 1.0f), Vector3(0.0f, 0.0f, 1.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
 
 	// Fill in the top face vertex data.
-	v[8]  = {Vector3(-w2, +h2, -d2), Vector2(0.0f, 1.0f), Vector3(0.0f, 1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)};
-	v[9]  = {Vector3(-w2, +h2, +d2), Vector2(0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)};
-	v[10] = {Vector3(+w2, +h2, +d2), Vector2(1.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)};
-	v[11] = {Vector3(+w2, +h2, -d2), Vector2(1.0f, 1.0f), Vector3(0.0f, 1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)};
+	v[8]  = {Vector3(-w2, +h2, -d2), Vector2(0.0f, 1.0f), Vector3(0.0f, 1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
+	v[9]  = {Vector3(-w2, +h2, +d2), Vector2(0.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
+	v[10] = {Vector3(+w2, +h2, +d2), Vector2(1.0f, 0.0f), Vector3(0.0f, 1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
+	v[11] = {Vector3(+w2, +h2, -d2), Vector2(1.0f, 1.0f), Vector3(0.0f, 1.0f, 0.0f), Vector4(1.0f, 0.0f, 0.0f, 1.0f)};
 
 	// Fill in the bottom face vertex data.
-	v[12] = {Vector3(-w2, -h2, -d2), Vector2(0.0f, 1.0f), Vector3(0.0f, -1.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f)};
-	v[13] = {Vector3(+w2, -h2, -d2), Vector2(0.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f)};
-	v[14] = {Vector3(+w2, -h2, +d2), Vector2(1.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f)};
-	v[15] = {Vector3(-w2, -h2, +d2), Vector2(1.0f, 1.0f), Vector3(0.0f, -1.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f)};
+	v[12] = {Vector3(-w2, -h2, -d2), Vector2(0.0f, 1.0f), Vector3(0.0f, -1.0f, 0.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
+	v[13] = {Vector3(+w2, -h2, -d2), Vector2(0.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
+	v[14] = {Vector3(+w2, -h2, +d2), Vector2(1.0f, 0.0f), Vector3(0.0f, -1.0f, 0.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
+	v[15] = {Vector3(-w2, -h2, +d2), Vector2(1.0f, 1.0f), Vector3(0.0f, -1.0f, 0.0f), Vector4(-1.0f, 0.0f, 0.0f, 1.0f)};
 
 	// Fill in the left face vertex data.
-	v[16] = {Vector3(-w2, -h2, +d2), Vector2(0.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f)};
-	v[17] = {Vector3(-w2, +h2, +d2), Vector2(0.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f)};
-	v[18] = {Vector3(-w2, +h2, -d2), Vector2(1.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f)};
-	v[19] = {Vector3(-w2, -h2, -d2), Vector2(1.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, -1.0f)};
+	v[16] = {Vector3(-w2, -h2, +d2), Vector2(0.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, -1.0f, 1.0f)};
+	v[17] = {Vector3(-w2, +h2, +d2), Vector2(0.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, -1.0f, 1.0f)};
+	v[18] = {Vector3(-w2, +h2, -d2), Vector2(1.0f, 0.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, -1.0f, 1.0f)};
+	v[19] = {Vector3(-w2, -h2, -d2), Vector2(1.0f, 1.0f), Vector3(-1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, -1.0f, 1.0f)};
 
 	// Fill in the right face vertex data.
-	v[20] = {Vector3(+w2, -h2, -d2), Vector2(0.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f)};
-	v[21] = {Vector3(+w2, +h2, -d2), Vector2(0.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f)};
-	v[22] = {Vector3(+w2, +h2, +d2), Vector2(1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f)};
-	v[23] = {Vector3(+w2, -h2, +d2), Vector2(1.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 1.0f)};
+	v[20] = {Vector3(+w2, -h2, -d2), Vector2(0.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, 1.0f, 1.0f)};
+	v[21] = {Vector3(+w2, +h2, -d2), Vector2(0.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, 1.0f, 1.0f)};
+	v[22] = {Vector3(+w2, +h2, +d2), Vector2(1.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, 1.0f, 1.0f)};
+	v[23] = {Vector3(+w2, -h2, +d2), Vector2(1.0f, 1.0f), Vector3(1.0f, 0.0f, 0.0f), Vector4(0.0f, 0.0f, 1.0f, 1.0f)};
 
 	data->m_vertices.assign(&v[0], &v[24]);
  
@@ -666,6 +668,7 @@ SharedPtr<PrimitiveMeshGeometryData> create_sphere(f32 radius, u32 width_segment
 			v.tangent.x = -radius * ZV::sin(phi) * ZV::sin(theta);
 			v.tangent.y = 0.0f;
 			v.tangent.z = +radius * ZV::sin(phi) * ZV::cos(theta);
+            v.tangent.w = 1.0f;
 			v.tangent.Normalize();
 
             Vector3 p = v.position;
@@ -812,6 +815,7 @@ SharedPtr<PrimitiveMeshGeometryData> create_icosphere(f32 radius, u32 num_subdiv
         data->m_vertices[i].tangent.x = -radius*ZV::sin(phi)*ZV::sin(theta);
         data->m_vertices[i].tangent.y = 0.0f;
         data->m_vertices[i].tangent.z = +radius*ZV::sin(phi)*ZV::cos(theta);
+        data->m_vertices[i].tangent.w = 1.0f;
         data->m_vertices[i].tangent.Normalize();
     }
 

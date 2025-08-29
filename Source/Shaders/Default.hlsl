@@ -29,7 +29,7 @@ VertexShaderOutput VS(MeshVertex IN)
     OUT.position_w = position_world.xyz;
 
     OUT.normal_w = normalize(mul((float3x3)per_object_cb.world_matrix, IN.normal));
-    OUT.tangent_w = normalize(mul((float3x3)per_object_cb.world_matrix, IN.tangent));
+    OUT.tangent_w = float4(normalize(mul((float3x3)per_object_cb.world_matrix, IN.tangent.xyz)), IN.tangent.w);
 
     OUT.position_h = mul(per_pass_cb.view_matrix, position_world);
     OUT.position_h = mul(per_pass_cb.projection_matrix, OUT.position_h);

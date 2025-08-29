@@ -77,9 +77,9 @@ static HashMap<AssetId, TextureLoadInfo> s_texture_load_infos =
 
     // Sponza
     {AssetId("Sponza/white.png"), TextureLoadInfo{"Assets/Textures/Models/Sponza/white.png", TextureFormat::SRGB, 4}},
-    {AssetId("Sponza/332936164838540657.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/332936164838540657.jpg", TextureFormat::Linear, 4, ChannelPacking::Metalness | ChannelPacking::Roughness}},
-    {AssetId("Sponza/466164707995436622.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/466164707995436622.jpg", TextureFormat::Linear, 4, ChannelPacking::Roughness}},
-    {AssetId("Sponza/715093869573992647.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/715093869573992647.jpg", TextureFormat::Linear, 4}},
+    {AssetId("Sponza/332936164838540657.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/332936164838540657.jpg", TextureFormat::Linear, 4}},
+    {AssetId("Sponza/466164707995436622.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/466164707995436622.jpg", TextureFormat::Linear, 4, ChannelPacking::Metalness | ChannelPacking::Roughness}},
+    {AssetId("Sponza/715093869573992647.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/715093869573992647.jpg", TextureFormat::Linear, 4, ChannelPacking::Roughness}},
     {AssetId("Sponza/755318871556304029.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/755318871556304029.jpg", TextureFormat::SRGB, 4}},
     {AssetId("Sponza/759203620573749278.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/759203620573749278.jpg", TextureFormat::Linear, 4}},
     {AssetId("Sponza/10381718147657362067.jpg"), TextureLoadInfo{"Assets/Textures/Models/Sponza/10381718147657362067.jpg", TextureFormat::Linear, 4}},

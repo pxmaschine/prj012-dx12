@@ -103,9 +103,9 @@ Renderer::~Renderer()
 {
   m_dx12_state->flush_queues();
 
-  for (auto& texture : m_textures)
+  for (auto& render_texture : m_textures)
   {
-    m_dx12_state->destroy_texture_resource(move_ptr(texture->m_texture_resource));
+    m_dx12_state->destroy_texture_resource(move_ptr(render_texture->m_texture->m_texture_resource));
   }
 
   m_dx12_state->destroy_buffer_resource(move_ptr(m_per_object_constant_buffer_dummy));
@@ -159,9 +159,9 @@ void Renderer::push_texture(const AssetId& id)
 
   if (!texture_asset)
   {
-    Assets::load_texture_asset(id);
+    Assets::load_texture_asset_async(id);
 
-    m_pending_texture_loads.emplace_back(id);
+    m_pending_texture_loads.emplace(id);
   }
   else
   {
@@ -177,7 +177,7 @@ void Renderer::push_model(const AssetId& id, const Matrix& world_matrix)
   {
     Assets::load_model_asset(id);
 
-    m_pending_model_loads.emplace_back(ModelLoadData{ id, world_matrix });
+    m_pending_model_loads.emplace(id, ModelLoadData{ id, world_matrix });
   }
   else
   {
@@ -187,7 +187,7 @@ void Renderer::push_model(const AssetId& id, const Matrix& world_matrix)
 
 void Renderer::process_previous_frame_loads()
 {
-  const DynamicArray<AssetId>&& temp1 = move_ptr(m_previous_pending_texture_loads);
+  const HashSet<AssetId>&& temp1 = move_ptr(m_previous_pending_texture_loads);
   m_previous_pending_texture_loads = move_ptr(m_pending_texture_loads);
   m_pending_texture_loads = move_ptr(temp1);
 
@@ -200,20 +200,28 @@ void Renderer::process_previous_frame_loads()
     {
       setup_render_resources(texture_asset);
     }
+    else
+    {
+     m_pending_texture_loads.emplace(id);
+    }
   }
 
-  const DynamicArray<ModelLoadData>&& temp2 = move_ptr(m_previous_pending_model_loads);
+  const HashMap<AssetId, ModelLoadData>&& temp2 = move_ptr(m_previous_pending_model_loads);
   m_previous_pending_model_loads = move_ptr(m_pending_model_loads);
   m_pending_model_loads = move_ptr(temp2);
 
   m_pending_model_loads.clear();
   
-  for (auto& model_load_data : m_previous_pending_model_loads)
+  for (auto& pair : m_previous_pending_model_loads)
   {
-    ModelAsset* model_asset = Assets::get_model_asset(model_load_data.m_id);
+    ModelAsset* model_asset = Assets::get_model_asset(pair.first);
     if (model_asset)
     {
-      setup_render_resources(model_asset, model_load_data.m_world_matrix);
+      setup_render_resources(model_asset, pair.second.m_world_matrix);
+    }
+    else
+    {
+      m_pending_model_loads.emplace(pair);
     }
   }
 
@@ -231,16 +239,17 @@ void Renderer::process_previous_frame_loads()
 
 void Renderer::setup_render_resources(ModelAsset* model_asset, const Matrix& world_matrix)
 {
-  bool setup_complete = true;
-
   for (auto& submesh : model_asset->m_submeshes)
   {
     if (!check_dependencies(submesh.m_material_info))
     {
-      setup_complete = false;
-      continue;
+      m_pending_model_loads.emplace(model_asset->m_id, ModelLoadData{ model_asset->m_id, world_matrix });
+      return;
     }
+  }
 
+  for (auto& submesh : model_asset->m_submeshes)
+  {
     MaterialData* material_data = create_material_data();
     read_material_data_from_info(submesh.m_material_info, material_data);
 
@@ -254,17 +263,17 @@ void Renderer::setup_render_resources(ModelAsset* model_asset, const Matrix& wor
       render_object->m_constants.world_matrix = submesh.m_world_transform;
     }
   }
-
-  if (!setup_complete)
-  {
-    m_pending_model_loads.emplace_back(ModelLoadData{ model_asset->m_id, world_matrix });
-  }
 }
 
 void Renderer::setup_render_resources(TextureAsset* texture_asset)
 {
-  m_textures.emplace_back(move_ptr(m_dx12_state->create_texture_data(texture_asset)));
-  DX12TextureData* dx12_texture_data = m_textures.back().get();
+  UniquePtr<RenderTexture> render_texture = make_unique_ptr<RenderTexture>();
+  render_texture->m_texture = move_ptr(m_dx12_state->create_texture_data(texture_asset));
+#if ZV_DEBUG
+  render_texture->m_asset_name = texture_asset->m_id.name();
+#endif
+  m_textures.emplace_back(move_ptr(render_texture));
+  DX12TextureData* dx12_texture_data = m_textures.back()->m_texture.get();
 
   DX12UploadCommandContext* dx12_upload_ctx = m_dx12_state->get_upload_context_for_current_frame();
   dx12_upload_ctx->record_texture_upload(dx12_texture_data);
@@ -291,101 +300,31 @@ bool Renderer::check_dependencies(const MaterialInfo& material_info)
 {
   bool all_dependencies_ready = true;
 
-  if (material_info.m_albedo_texture_id.is_valid())
+  auto check_texture = [&](const AssetId& id)
   {
-    TextureAsset* texture_asset = Assets::get_texture_asset(material_info.m_albedo_texture_id);
+    // If the texture id is invalid, it means that the texture is not needed for this material
+    if (!id.is_valid())
+    {
+      return true;
+    }
+
+    TextureAsset* texture_asset = Assets::get_texture_asset(id);
     if (!texture_asset)
     {
-      // Assets::load_texture_asset(material_info.m_albedo_texture_id);
-      push_texture(material_info.m_albedo_texture_id);
-      all_dependencies_ready = false;
+      push_texture(id);
+      return false;
     }
-    else
-    {
-      all_dependencies_ready = texture_asset->m_state == AssetState::Loaded && texture_asset->is_ready();
-    }
-  }
-  if (material_info.m_normal_texture_id.is_valid())
-  {
-    TextureAsset* texture_asset = Assets::get_texture_asset(material_info.m_normal_texture_id);
-    if (!texture_asset)
-    {
-      // Assets::load_texture_asset(material_info.m_normal_texture_id);
-      push_texture(material_info.m_normal_texture_id);
-      all_dependencies_ready = false;
-    }
-    else
-    {
-      all_dependencies_ready = texture_asset->m_state == AssetState::Loaded && texture_asset->is_ready();
-    }
-  }
-  if (material_info.m_metallic_roughness_texture_id.is_valid())
-  {
-    TextureAsset* texture_asset = Assets::get_texture_asset(material_info.m_metallic_roughness_texture_id);
-    if (!texture_asset)
-    {
-      // Assets::load_texture_asset(material_info.m_metallic_roughness_texture_id);
-      push_texture(material_info.m_metallic_roughness_texture_id);
-      all_dependencies_ready = false;
-    }
-    else
-    {
-      all_dependencies_ready = texture_asset->m_state == AssetState::Loaded && texture_asset->is_ready();
-    }
-  }
-  if (material_info.m_ao_texture_id.is_valid())
-  {
-    TextureAsset* texture_asset = Assets::get_texture_asset(material_info.m_ao_texture_id);
-    if (!texture_asset)
-    {
-      // Assets::load_texture_asset(material_info.m_ao_texture_id);
-      push_texture(material_info.m_ao_texture_id);
-      all_dependencies_ready = false;
-    }
-    else
-    {
-      all_dependencies_ready = texture_asset->m_state == AssetState::Loaded && texture_asset->is_ready();
-    }
-  }
-  if (material_info.m_emissive_texture_id.is_valid())
-  {
-    TextureAsset* texture_asset = Assets::get_texture_asset(material_info.m_emissive_texture_id);
-    if (!texture_asset)
-    {
-      // Assets::load_texture_asset(material_info.m_emissive_texture_id);
-      push_texture(material_info.m_emissive_texture_id);
-      all_dependencies_ready = false;
-    }
-    else
-    {
-      all_dependencies_ready = texture_asset->m_state == AssetState::Loaded && texture_asset->is_ready();
-    }
-  }
-  if (material_info.m_overlay_texture_id.is_valid())
-  {
-    TextureAsset* texture_asset = Assets::get_texture_asset(material_info.m_overlay_texture_id);
-    if (!texture_asset)
-    {
-      push_texture(material_info.m_overlay_texture_id);
-      all_dependencies_ready = false;
-    }
-    else
-    {
-      all_dependencies_ready = texture_asset->m_state == AssetState::Loaded && texture_asset->is_ready();
-    }
-  }
-  if (material_info.m_specular_texture_id.is_valid())
-  {
-    TextureAsset* texture_asset = Assets::get_texture_asset(material_info.m_specular_texture_id);
-    if (!texture_asset)
-    {
-      push_texture(material_info.m_specular_texture_id);
-    }
-    else
-    {
-      all_dependencies_ready = texture_asset->m_state == AssetState::Loaded && texture_asset->is_ready();
-    }
-  }
+    
+    return /*texture_asset->m_state == AssetState::Loaded && */texture_asset->is_ready();
+  };
+
+  all_dependencies_ready &= check_texture(material_info.m_albedo_texture_id);
+  all_dependencies_ready &= check_texture(material_info.m_normal_texture_id);
+  all_dependencies_ready &= check_texture(material_info.m_metallic_roughness_texture_id);
+  all_dependencies_ready &= check_texture(material_info.m_ao_texture_id);
+  all_dependencies_ready &= check_texture(material_info.m_emissive_texture_id);
+  all_dependencies_ready &= check_texture(material_info.m_overlay_texture_id);
+  all_dependencies_ready &= check_texture(material_info.m_specular_texture_id);
 
   return all_dependencies_ready;
 }
@@ -472,6 +411,8 @@ RenderObject* Renderer::create_render_object(MeshGeometryData* geometry, Materia
 
 void Renderer::create_default_graphics_pipeline()
 {
+  Assets::load_texture_asset("dummy");
+
   push_texture("dummy");
   
   TextureAsset* dummy_asset = Assets::get_texture_asset("dummy");
@@ -599,7 +540,7 @@ void Renderer::create_default_graphics_pipeline()
   pipeline_desc.m_input_layout.m_elements[0] = { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 };
   pipeline_desc.m_input_layout.m_elements[1] = { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 };
   pipeline_desc.m_input_layout.m_elements[2] = { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 };
-  pipeline_desc.m_input_layout.m_elements[3] = { "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 };
+  pipeline_desc.m_input_layout.m_elements[3] = { "TANGENT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 };
   pipeline_desc.m_input_layout.m_num_elements = 4;
   pipeline_desc.m_depth_stencil_desc.DepthEnable = true;
   pipeline_desc.m_depth_stencil_desc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
