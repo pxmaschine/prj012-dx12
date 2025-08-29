@@ -1,103 +1,132 @@
 #include <Platform/Jobs.h>
 
+#include <Platform/PlatformContext.h>
+
+#ifdef ZV_COMPILER_CL
+#include <immintrin.h> // for _mm_pause on MSVC (optional micro-wait)
+#endif
+
 namespace
 {
-    bool win32_do_next_job_entry(JobQueue* queue)
+    inline void cpu_relax()
     {
-        bool should_sleep = false;
-    
-        u32 r   = queue->next_entry_to_read.load(std::memory_order_relaxed);
-        u32 w   = queue->next_entry_to_write.load(std::memory_order_acquire);
-        u32 nr  = (r + 1) % ArrayCount(queue->entries);
-    
-        if (r != w)
-        {
-            // Try to claim this slot. On success, we "acquire" the published entry.
-            if (queue->next_entry_to_read.compare_exchange_weak(
-                    r, nr,
-                    std::memory_order_acquire,   // success
-                    std::memory_order_relaxed))  // failure
-            {
-                JobQueueEntry entry = queue->entries[r];
-                entry.callback(queue, entry.data);
-    
-                // Publish “work done”: release makes prior writes visible to waiters.
-                queue->completion_count.fetch_add(1, std::memory_order_release);
-            }
-            // else: another worker grabbed it; just fall through and return (no sleep)
-        }
-        else
-        {
-            should_sleep = true;
-        }
-    
-        return should_sleep;
+#ifdef ZV_COMPILER_CL
+        _mm_pause();
+#else
+        // TODO: Implement for other compilers
+#endif
+    }
+
+    // Pop exactly one job (assumes caller has already observed "one job exists",
+    // e.g., by waiting on the semaphore).
+    inline void win32_pop_and_execute(JobQueue* q)
+    {
+        const u32 pos = q->head.fetch_add(1, std::memory_order_acq_rel);
+        JobQueueEntry* cell = &q->entries[pos & k_job_queue_mask];
+
+        // Wait until the producer publishes this slot (seq == pos + 1)
+        u32 expected = pos + 1;
+        while (cell->seq.load(std::memory_order_acquire) != expected)
+            cpu_relax();
+
+        // Read payload
+        JobQueueCallback* cb = cell->callback;
+        void* data = cell->data;
+
+        // Mark slot as free for a future producer: seq = pos + JOBQ_CAP
+        cell->seq.store(pos + k_max_num_jobs, std::memory_order_release);
+
+        // Do the work and publish completion
+        cb(q, data);
+        q->completion_count.fetch_add(1, std::memory_order_release);
     }
 
     DWORD WINAPI thread_proc(LPVOID lpParameter)
     {
-        JobQueue* queue = (JobQueue*)lpParameter;
-
-        for(;;)
+        JobQueue* q = (JobQueue*)lpParameter;
+        for (;;)
         {
-            if (win32_do_next_job_entry(queue))
-            {
-                WaitForSingleObjectEx(queue->semaphore_handle, INFINITE, FALSE);
-            }
+            WaitForSingleObjectEx(q->semaphore_handle, INFINITE, FALSE);
+            win32_pop_and_execute(q);
         }
     }
 }
 
 void win32_create_job_queue(JobQueue* queue, u32 thread_count)
 {
-    queue->completion_goal.store(0);
-    queue->completion_count.store(0);
-    queue->next_entry_to_write.store(0);
-    queue->next_entry_to_read.store(0);
+    queue->completion_goal.store(0, std::memory_order_relaxed);
+    queue->completion_count.store(0, std::memory_order_relaxed);
+    queue->head.store(0, std::memory_order_relaxed);
+    queue->tail.store(0, std::memory_order_relaxed);
 
-    u32 initial_count = 0;
-    queue->semaphore_handle = CreateSemaphoreEx(0, initial_count, thread_count, 0, 0, SEMAPHORE_ALL_ACCESS);
+    // Initialize per-slot sequences: empty slot i has seq == i
+    for (u32 i = 0; i < k_max_num_jobs; ++i)
+    {
+        queue->entries[i].seq.store(i, std::memory_order_relaxed);
+        queue->entries[i].callback = nullptr;
+        queue->entries[i].data     = nullptr;
+    }
+
+    // Max count must be able to cover queued jobs
+    queue->semaphore_handle = CreateSemaphoreExA(
+        /*lpSemaphoreAttributes*/ nullptr,
+        /*lInitialCount*/ 0,
+        /*lMaximumCount*/ k_max_num_jobs,
+        /*lpName*/ nullptr,
+        /*dwFlags*/ 0,
+        /*dwDesiredAccess*/ SEMAPHORE_ALL_ACCESS);
 
     for (u32 thread_index = 0; thread_index < thread_count; ++thread_index)
     {
         DWORD thread_id;
-        HANDLE thread_handle = CreateThread(0, 0, thread_proc, queue, 0, &thread_id);
-        CloseHandle(thread_handle);
+        HANDLE h = CreateThread(nullptr, 0, thread_proc, queue, 0, &thread_id);
+        CloseHandle(h);
     }
 }
 
 void win32_add_job_entry(JobQueue* queue, JobQueueCallback* callback, void* data)
 {
-    u32 w  = queue->next_entry_to_write.load(std::memory_order_relaxed);
-    u32 nw = (w + 1) % ArrayCount(queue->entries);
+    // Reserve a ticket (unique position)
+    const u32 pos = queue->tail.fetch_add(1, std::memory_order_acq_rel);
+    JobQueueEntry* cell = &queue->entries[pos & k_job_queue_mask];
 
-    // Acquire pairs with the consumer's release of NextEntryToRead;
-    // also prevents overwriting unread entries.
-    zv_assert(nw != queue->next_entry_to_read.load(std::memory_order_acquire));
+    // Wait for the slot to become empty for this position
+    while (cell->seq.load(std::memory_order_acquire) != pos)
+    {
+        cpu_relax();
+    }
 
-    JobQueueEntry* entry = queue->entries + w;
-    entry->callback = callback;
-    entry->data     = data;
+    // Write payload (plain stores are fine, publication happens via seq.store release)
+    cell->callback = callback;
+    cell->data     = data;
 
-    // Count isn't used to publish data, so relaxed is fine here.
+    // Bump goal before making the job visible is fine (relaxed)
     queue->completion_goal.fetch_add(1, std::memory_order_relaxed);
 
-    // Publish the slot: everything above becomes visible to consumers.
-    queue->next_entry_to_write.store(nw, std::memory_order_release);
+    // Publish: make the slot visible to consumers of position 'pos'
+    cell->seq.store(pos + 1, std::memory_order_release);
 
-    ReleaseSemaphore(queue->semaphore_handle, 1, 0);
+    // Wake exactly one worker
+    ReleaseSemaphore(queue->semaphore_handle, 1, nullptr);
 }
 
 void win32_complete_all_jobs(JobQueue* queue)
 {
-    // Acquire on count observes workers' release increments.
     while (queue->completion_count.load(std::memory_order_acquire) !=
            queue->completion_goal.load(std::memory_order_relaxed))
     {
-        win32_do_next_job_entry(queue);
+        // Opportunistically help (optional: you could also Wait+pop here)
+        DWORD r = WaitForSingleObjectEx(queue->semaphore_handle, 0, FALSE);
+        if (r == WAIT_OBJECT_0)
+        {
+            win32_pop_and_execute(queue);
+        }
+        else
+        {
+            cpu_relax();
+        }
     }
 
-    // These resets are just bookkeeping.
     queue->completion_goal.store(0, std::memory_order_relaxed);
     queue->completion_count.store(0, std::memory_order_relaxed);
 }

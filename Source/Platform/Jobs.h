@@ -27,14 +27,18 @@ typedef JOB_QUEUE_CALLBACK(JobQueueCallback);
 // typedef void job_queue_add_entry(JobQueue* queue, JobQueueCallback* callback, void* data);
 // typedef void job_queue_complete_all_work(JobQueue* queue);
 
-enum class JobPriority
+enum class JobPriority : u8
 {
     High,
     Low,
 };
 
+constexpr u32 k_max_num_jobs = 256;  // must be power of two
+constexpr u32 k_job_queue_mask = k_max_num_jobs - 1;
+
 struct JobQueueEntry
 {
+    std::atomic<u32> seq;                   // sequence number (see algo below)
     JobQueueCallback* callback;
     void* data;
 };
@@ -44,11 +48,11 @@ struct JobQueue
     std::atomic<u32> completion_goal{0};
     std::atomic<u32> completion_count{0};
 
-    std::atomic<u32> next_entry_to_write{0}; // ring buffer indices
-    std::atomic<u32> next_entry_to_read{0};
+    std::atomic<u32> head{0};              // consumer ticket counter
+    std::atomic<u32> tail{0};              // producer ticket counter
 
     HANDLE semaphore_handle{};
-    JobQueueEntry entries[256];
+    JobQueueEntry entries[k_max_num_jobs];
 };
 
 void win32_create_job_queue(JobQueue* queue, u32 thread_count);

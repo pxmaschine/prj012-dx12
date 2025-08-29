@@ -228,7 +228,7 @@ namespace Assets
     void load_texture_asset(const AssetId& id);
     TextureAsset* get_texture_asset(const AssetId& id);
 
-    // void load_model_asset_async(const AssetId& id);
+    void load_model_asset_async(const AssetId& id);
     void load_model_asset(const AssetId& id);
     ModelAsset* get_model_asset(const AssetId& id);
 

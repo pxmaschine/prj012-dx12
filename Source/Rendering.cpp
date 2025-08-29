@@ -175,7 +175,7 @@ void Renderer::push_model(const AssetId& id, const Matrix& world_matrix)
 
   if (!model_asset)
   {
-    Assets::load_model_asset(id);
+    Assets::load_model_asset_async(id);
 
     m_pending_model_loads.emplace(id, ModelLoadData{ id, world_matrix });
   }

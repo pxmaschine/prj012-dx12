@@ -17,15 +17,8 @@
 
 #include <AssetTable.cpp>
 
-#include <unordered_set>
-
 namespace { class AssetManager; }
 static UniquePtr<AssetManager> s_asset_manager{ nullptr };
-
-// // stb_image has a thread-local version of the flip flag.
-// // If your stb version doesn't have this, either always load unflipped and
-// // manually flip the pixels, or ensure all threads use the same setting.
-// extern "C" void stbi_set_flip_vertically_on_load_thread(int flag);
 
 namespace
 {
@@ -390,6 +383,10 @@ namespace
 
         Mutex m_tex_mutex;
         HashSet<AssetId> m_tex_inflight;
+
+        // For async model loading
+        Mutex m_model_mutex;
+        HashSet<AssetId> m_model_inflight;
     
         struct TextureLoadJob
         {
@@ -397,8 +394,15 @@ namespace
             AssetId id;
             bool flip_vertically;
         };
+
+        struct ModelLoadJob
+        {
+            AssetManager* manager;
+            AssetId id;
+        };
     
         static void load_texture_asset_job(JobQueue* queue, void* data);
+        static void load_model_asset_job(JobQueue* queue, void* data);
 
     public:
         AssetManager() : BaseType(this) {}
@@ -409,54 +413,13 @@ namespace
         TextureAsset* get_texture_asset(const AssetId& id);
 
         void load_model_asset(const AssetId& id);
+        void load_model_asset_async(const AssetId& id);
         ModelAsset* get_model_asset(const AssetId& id);
 
     private:
         TextureLoadInfo get_texture_load_info(const AssetId& id) const;
         ModelLoadInfo get_model_load_info(const AssetId& id) const;
     };
-
-    // void AssetManager::load_texture_asset_async(const AssetId& id, bool flip_vertically)
-    // {
-    //     zv_assert_msg(id.is_valid(), "Invalid asset id passed to load_texture_asset_async");
-
-    //     if (m_texture_assets.find(id) != m_texture_assets.end())
-    //     {
-    //         return;
-    //     }
-
-    //     TextureLoadInfo load_info = get_texture_load_info(id);
-
-    //     stbi_set_flip_vertically_on_load(flip_vertically);
-
-    //     s32 width = 0;
-    //     s32 height = 0;
-    //     s32 original_channels = 0;
-    //     u8* data = stbi_load(load_info.m_path, &width, &height, &original_channels, load_info.m_request_channels);
-    //     u32 total_size = width * height * load_info.m_request_channels;
-
-    //     zv_assert_msg(data != nullptr, "Failed to load texture file: {}", load_info.m_path);
-    
-    //     if (original_channels != load_info.m_request_channels)
-    //     {
-    //         zv_warning("Original channels ({}) != request channels ({}) for texture {}", original_channels, load_info.m_request_channels, load_info.m_path);
-    //     }
-
-    //     TextureAsset asset{};
-    //     asset.m_state = AssetState::Loaded;
-    //     asset.m_id = id;
-    //     asset.m_width = width;
-    //     asset.m_height = height;
-    //     asset.m_num_channels = load_info.m_request_channels;
-    //     asset.m_data = make_unique_ptr<u8[]>(total_size);
-    //     asset.m_dimension = TextureDimension::Texture2D;
-    //     asset.m_format = load_info.m_format;
-    
-    //     memcpy(asset.m_data.get(), data, total_size);
-    //     stbi_image_free(data);
-
-    //     m_texture_assets.emplace(id, move_ptr(asset));
-    // }
 
     void AssetManager::load_texture_asset_job(JobQueue*, void* data)
     {
@@ -564,50 +527,139 @@ namespace
         return &it->second;
     }
 
-    void AssetManager::load_model_asset(const AssetId& id)
+    // void AssetManager::load_model_asset(const AssetId& id)
+    // {
+    //     zv_assert_msg(id.is_valid(), "Invalid asset id passed to load_model_asset");
+
+    //     if (m_model_assets.find(id) != m_model_assets.end())
+    //     {
+    //         return;
+    //     }
+
+    //     ModelLoadInfo load_info = get_model_load_info(id);
+
+    //     cgltf_options options{};
+    //     cgltf_data* data = nullptr;
+    //     if (cgltf_parse_file(&options, load_info.m_path, &data) != cgltf_result_success)
+    //     {
+    //         zv_error("Failed to parse model file: {}", load_info.m_path);
+    //         return;
+    //     }
+
+    //     if (cgltf_load_buffers(&options, data, load_info.m_path) != cgltf_result_success)
+    //     {
+    //         zv_error("Failed to load buffers for model file: {}", load_info.m_path);
+    //         return;
+    //     }
+
+    //     if (data->scenes_count > 1)
+    //     {
+    //         zv_warning("Model file '{}' has multiple scenes, only the first one will be used", load_info.m_path);
+    //     }
+
+    //     if (data->scenes_count == 0)
+    //     {
+    //         zv_warning("No model data found for model file '{}'", load_info.m_path);
+    //         return;
+    //     }
+
+    //     ModelAsset asset{ id };
+    //     cgltf_parse_model_data(load_info, &data->scenes[0], &asset);
+    //     cgltf_free(data);
+
+    //     // asset.m_state = AssetState::Loaded;
+
+    //     m_model_assets.emplace(id, move_ptr(asset));
+    // }
+
+    // --- ASYNC MODEL LOADING LOGIC STARTS HERE ---
+
+    void AssetManager::load_model_asset_job(JobQueue*, void* data)
     {
-        zv_assert_msg(id.is_valid(), "Invalid asset id passed to load_model_asset");
+        UniquePtr<ModelLoadJob> job(static_cast<ModelLoadJob*>(data)); // auto-delete
+        AssetManager* manager = job->manager;
+        const AssetId id = job->id;
 
-        if (m_model_assets.find(id) != m_model_assets.end())
-        {
-            return;
-        }
-
-        ModelLoadInfo load_info = get_model_load_info(id);
+        // Gather info (safe; pure read)
+        ModelLoadInfo load_info = manager->get_model_load_info(id);
 
         cgltf_options options{};
-        cgltf_data* data = nullptr;
-        if (cgltf_parse_file(&options, load_info.m_path, &data) != cgltf_result_success)
+        cgltf_data* cgltfData = nullptr;
+        if (cgltf_parse_file(&options, load_info.m_path, &cgltfData) != cgltf_result_success)
         {
             zv_error("Failed to parse model file: {}", load_info.m_path);
+            // Clear inflight so a future call can retry
+            ScopedLock lock(manager->m_model_mutex);
+            manager->m_model_inflight.erase(id);
             return;
         }
 
-        if (cgltf_load_buffers(&options, data, load_info.m_path) != cgltf_result_success)
+        if (cgltf_load_buffers(&options, cgltfData, load_info.m_path) != cgltf_result_success)
         {
             zv_error("Failed to load buffers for model file: {}", load_info.m_path);
+            ScopedLock lock(manager->m_model_mutex);
+            manager->m_model_inflight.erase(id);
+            cgltf_free(cgltfData);
             return;
         }
 
-        if (data->scenes_count > 1)
+        if (cgltfData->scenes_count > 1)
         {
             zv_warning("Model file '{}' has multiple scenes, only the first one will be used", load_info.m_path);
         }
 
-        if (data->scenes_count == 0)
+        if (cgltfData->scenes_count == 0)
         {
             zv_warning("No model data found for model file '{}'", load_info.m_path);
+            ScopedLock lock(manager->m_model_mutex);
+            manager->m_model_inflight.erase(id);
+            cgltf_free(cgltfData);
             return;
         }
 
+        // Build the asset off-thread, no locks held
         ModelAsset asset{ id };
-        cgltf_parse_model_data(load_info, &data->scenes[0], &asset);
-        cgltf_free(data);
+        cgltf_parse_model_data(load_info, &cgltfData->scenes[0], &asset);
+        cgltf_free(cgltfData);
 
-        // asset.m_state = AssetState::Loaded;
+        // Publish under the mutex
+        {
+            ScopedLock lock(manager->m_model_mutex);
 
-        m_model_assets.emplace(id, move_ptr(asset));
+            // Another thread might have synchronously loaded it meanwhile
+            if (manager->m_model_assets.find(id) == manager->m_model_assets.end())
+            {
+                manager->m_model_assets.emplace(id, move_ptr(asset));
+            }
+
+            manager->m_model_inflight.erase(id);
+        }
     }
+
+    void AssetManager::load_model_asset_async(const AssetId& id)
+    {
+        zv_assert_msg(id.is_valid(), "Invalid asset id passed to load_model_asset_async");
+
+        {
+            ScopedLock lock(m_model_mutex);
+
+            if (m_model_assets.find(id) != m_model_assets.end())
+            {
+                return;
+            }
+
+            if (!m_model_inflight.insert(id).second)
+            {
+                return; // already queued
+            }
+        }
+
+        // Allocate a tiny job record; worker deletes it when done.
+        auto* job = new ModelLoadJob{ this, id };
+        Platform::add_job(JobPriority::High, &AssetManager::load_model_asset_job, job);
+    }
+
+    // --- END ASYNC MODEL LOADING LOGIC ---
 
     ModelAsset* AssetManager::get_model_asset(const AssetId& id)
     {
@@ -671,10 +723,19 @@ TextureAsset* Assets::get_texture_asset(const AssetId& id)
     return s_asset_manager->get_texture_asset(id);
 }
 
+void Assets::load_model_asset_async(const AssetId& id)
+{
+    zv_assert_msg(s_asset_manager != nullptr, "Asset manager not initialized!");
+    s_asset_manager->load_model_asset_async(id);
+}
+
 void Assets::load_model_asset(const AssetId& id)
 {
     zv_assert_msg(s_asset_manager != nullptr, "Asset manager not initialized!");
-    s_asset_manager->load_model_asset(id);
+
+    s_asset_manager->load_model_asset_async(id);
+
+    Platform::complete_all_jobs(JobPriority::High);
 }
 
 ModelAsset* Assets::get_model_asset(const AssetId& id)
