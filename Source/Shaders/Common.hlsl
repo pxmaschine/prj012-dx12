@@ -34,6 +34,17 @@
 #define MaterialFeature_OverlayMap   128u
 #define MaterialFeature_EmissiveMap  256u
 
+#define OutputMode_SDR 0u
+#define OutputMode_HDR10 1u
+#define OutputMode_scRGB 2u
+
+#define TonemapType_Linear 0u
+#define TonemapType_Reinhard 1u
+#define TonemapType_ExtendedReinhard 2u
+#define TonemapType_ACES 3u
+#define TonemapType_Uncharted2 4u
+#define TonemapType_FilmicALU 5u
+
 struct VertexShaderOutput
 {
     float4 position_h : SV_POSITION;
@@ -42,6 +53,86 @@ struct VertexShaderOutput
     float3 normal_w   : NORMAL0;
     float4 tangent_w  : TANGENT0;
 };
+
+float3 linear_to_srgb(float3 color)
+{
+    return pow(color, 1.0f / 2.2f);
+}
+
+float3 srgb_to_linear(float3 color)
+{
+    return pow(color, 2.2f);
+}
+
+float3 linear_to_st2084(float3 color)
+{
+    float m1 = 2610.0 / 4096.0 / 4;
+    float m2 = 2523.0 / 4096.0 * 128;
+    float c1 = 3424.0 / 4096.0;
+    float c2 = 2413.0 / 4096.0 * 32;
+    float c3 = 2392.0 / 4096.0 * 32;
+    float3 cp = pow(abs(color), m1);
+    return pow((c1 + c2 * cp) / (1 + c3 * cp), m2);
+}
+
+float3 rec709_to_rec2020(float3 color)
+{
+    static const float3x3 conversion =
+    {
+        0.627402, 0.329292, 0.043306,
+        0.069095, 0.919544, 0.011360,
+        0.016394, 0.088028, 0.895578
+    };
+    return mul(conversion, color);
+}
+
+float3 tonemap_reinhard(float3 color)
+{
+    return color / (1.0f + color);
+}
+
+float3 tonemap_extended_reinhard(float3 color, float max_white)
+{
+	return (color * (1.0f + color / (max_white * max_white)) ) / (1.0f + color);
+}
+
+float3 tonemap_aces(float3 color)
+{
+    const float a = 2.51f;
+    const float b = 0.03f;
+    const float c = 2.43f;
+    const float d = 0.59f;
+    const float e = 0.14f;
+    return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
+}
+
+float3 partial_tonemap_uncharted2(float3 color)
+{
+    const float a = 0.15f;
+    const float b = 0.50f;
+    const float c = 0.10f;
+    const float d = 0.20f;
+    const float e = 0.02f;
+    const float f = 0.30f;
+    return ((color * (a * color + c * b) + d * e) / (color * (a * color + b) + d * f)) - e / f;
+}
+
+float3 tonemap_uncharted2(float3 color)
+{
+    const float exposure_bias = 2.0f;
+    float3 curr = partial_tonemap_uncharted2(color * exposure_bias);
+
+    const float3 w = float3(11.2f, 11.2f, 11.2f);
+    float3 white_scale = float3(1.0f, 1.0f, 1.0f) / partial_tonemap_uncharted2(w);
+    return curr * white_scale;
+}
+
+float3 tonemap_filmic_alu(float3 color)
+{
+    color = max(0, color - 0.004f);
+    color = (color * (6.2f * color + 0.5f)) / (color * (6.2f * color + 1.7f)+ 0.06f);
+    return color;
+}
 
 float3 normal_sample_to_world(float3 normal_sample, float3 normal_w, float4 tangent_w)
 {

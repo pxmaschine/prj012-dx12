@@ -270,3 +270,38 @@ inline Vector4 basis_flip_y(const Vector4& v)
   return Vector4{ v.x, -v.y, v.z, v.w };
 }
 
+//------------------------------------------------------------------------------------------------------------------------------------
+// Color conversion utils
+//------------------------------------------------------------------------------------------------------------------------------------
+
+// Converts a single sRGB channel [0,1] to linear space [0,1]
+inline float srgb_channel_to_linear(float c)
+{
+  if (c <= 0.04045f)
+    return c / 12.92f;
+  else
+    return powf((c + 0.055f) / 1.055f, 2.4f);
+}
+
+// Converts a Vector3 sRGB color to linear space
+inline Vector3 srgb_to_linear(const Vector3& srgb)
+{
+  return Vector3{
+    srgb_channel_to_linear(srgb.x),
+    srgb_channel_to_linear(srgb.y),
+    srgb_channel_to_linear(srgb.z)
+  };
+}
+
+// Converts a Vector4 sRGB color to linear space (preserves alpha)
+inline Vector4 srgb_to_linear(const Vector4& srgb)
+{
+  return Vector4{
+    srgb_channel_to_linear(srgb.x),
+    srgb_channel_to_linear(srgb.y),
+    srgb_channel_to_linear(srgb.z),
+    srgb.w
+  };
+}
+
+

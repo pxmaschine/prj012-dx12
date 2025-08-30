@@ -488,10 +488,18 @@ private:
   Mutex m_event_mutex;
 };
 
+// Output mode enum for controlling HDR/SDR rendering
+enum class DX12OutputMode
+{
+  SDR,
+  HDR10,
+  scRGB
+};
+
 class DX12State
 {
 public:
-  DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync = false, bool msaa_enabled = false);
+  DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync = false, bool msaa_enabled = false, DX12OutputMode output_mode = DX12OutputMode::SDR);
   ~DX12State();
 
   void flush_queues();
@@ -503,6 +511,11 @@ public:
   void resize(u32 width, u32 height);
 
   u32 get_frame_id() const { return m_frame_index; }
+
+  constexpr DX12OutputMode get_output_mode() const { return m_output_mode; }
+  constexpr DXGI_FORMAT get_back_buffer_format() const;
+  constexpr DXGI_FORMAT get_msaa_format() const;
+  constexpr f32 get_reference_white_nits() const { return m_reference_white_nits; }
 
   DX12Descriptor& get_imgui_descriptor(u32 index) { return m_imgui_descriptors[index]; }
 
@@ -589,6 +602,8 @@ private:
   bool m_tearing_supported;
   bool m_msaa_enabled;
   u32 m_msaa_quality_level;
+  DX12OutputMode m_output_mode;
+  f32 m_reference_white_nits = 80.0f;    // The reference brightness level of the display.
 
   struct DX12DestructionQueue
   {

@@ -137,11 +137,44 @@ float4 PS(VertexShaderOutput IN) : SV_Target
 
     float4 out_color = float4(indirect_light + direct_light, final_albedo_color.a) + emissive_color;
 
-    // out_color = float4(metalness, metalness, metalness, 1.0f);
-    // out_color = float4(roughness, roughness, roughness, 1.0f);
-    // out_color = float4(ao, ao, ao, 1.0f);
+    // out_color.rgb = float3(1.0f, 1.0f, 1.0f) - exp(-out_color.rgb * per_frame_cb.exposure);
+    out_color.rgb = out_color.rgb * per_frame_cb.exposure;
 
-    // out_color = float4(direct_light.rgb, 1.0f);
+    if (per_frame_cb.tonemap_type == TonemapType_Reinhard)
+    {
+        out_color.rgb = tonemap_reinhard(out_color.rgb);
+    }
+    // else if (per_frame_cb.tonemap_type == TonemapType_ExtendedReinhard)
+    // {
+    //     out_color.rgb = tonemap_extended_reinhard(out_color.rgb, per_frame_cb.reference_white_nits);
+    // }
+    else if (per_frame_cb.tonemap_type == TonemapType_ACES)
+    {
+        out_color.rgb = tonemap_aces(out_color.rgb);
+    }
+    else if (per_frame_cb.tonemap_type == TonemapType_Uncharted2)
+    {
+        out_color.rgb = tonemap_uncharted2(out_color.rgb);
+    }
+    else if (per_frame_cb.tonemap_type == TonemapType_FilmicALU)
+    {
+        out_color.rgb = tonemap_filmic_alu(out_color.rgb);
+    }
+
+    if (per_frame_cb.output_mode == OutputMode_SDR)
+    {
+        out_color.rgb = linear_to_srgb(out_color.rgb);
+    }
+    else if (per_frame_cb.output_mode == OutputMode_HDR10)
+    {
+        const float st2084max = 10000.0;
+        const float hdr_scalar = per_frame_cb.reference_white_nits / st2084max;
+
+        out_color.rgb = rec709_to_rec2020(out_color.rgb);
+        out_color.rgb = linear_to_st2084(out_color.rgb * hdr_scalar);
+    }
+    // else
+    // scRGB just keeps the values in linear space
 
     return out_color;
 }

@@ -71,6 +71,73 @@ namespace
     return msaa_quality_level;
   }
 
+  inline constexpr DXGI_FORMAT get_resource_format_from_output_mode(DX12OutputMode output_mode)
+  {
+    switch (output_mode)
+    {
+      case DX12OutputMode::SDR:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+      case DX12OutputMode::HDR10:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
+      case DX12OutputMode::scRGB:
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    }
+
+    zv_assert_msg(false, "unreachable code");
+    return DXGI_FORMAT_R8G8B8A8_UNORM;
+  }
+
+  inline constexpr DXGI_FORMAT get_msaa_format_from_output_mode(DX12OutputMode output_mode)
+  {
+    // TODO: This is a misunderstanding. "msaa format" is really just the format of the back buffer.
+    //   But we need to refactor msaa and hdr into separate passes, so we can handle 16 bit float buffers and 10 bit float buffers separately.
+    //   See: https://stackoverflow.com/questions/66830705/is-it-possible-to-combine-hdr-with-msaa-in-a-directx-12-desktop-application
+    // return output_mode == DX12OutputMode::SDR ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
+  
+    // Hacky "low quality" version for now until above is resolved
+    switch (output_mode)
+    {
+      case DX12OutputMode::SDR:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+      case DX12OutputMode::HDR10:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
+      case DX12OutputMode::scRGB:
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    }
+
+    zv_assert_msg(false, "unreachable code");
+    return DXGI_FORMAT_R8G8B8A8_UNORM;
+  }
+
+  inline constexpr DXGI_COLOR_SPACE_TYPE get_output_mode_color_space(DX12OutputMode output_mode)
+  {
+    switch (output_mode)
+    {
+      case DX12OutputMode::SDR:
+        return DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+      case DX12OutputMode::HDR10:
+        return DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+      case DX12OutputMode::scRGB:
+        return DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
+    }
+
+    zv_assert_msg(false, "unreachable code");
+    return DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+  }
+
+  inline bool try_set_color_space(IDXGISwapChain4* swap_chain, DXGI_COLOR_SPACE_TYPE color_space)
+  {
+    UINT flags = 0;
+
+    if (SUCCEEDED(swap_chain->CheckColorSpaceSupport(color_space, &flags)) && 
+        (flags & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT))
+    {
+      return SUCCEEDED(swap_chain->SetColorSpace1(color_space));
+    }
+
+    return false;
+  }
+
   inline IDXGIAdapter4* get_adapter()
   {
     IDXGIFactory4* dxgi_factory;
@@ -163,6 +230,8 @@ namespace
       ID3D12CommandQueue* command_queue,
       uint32_t width, uint32_t height,
       uint32_t buffer_count,
+      DXGI_FORMAT format,
+      DXGI_COLOR_SPACE_TYPE color_space,
       bool is_tearing_supported)
   {
     IDXGISwapChain4* dxgi_swap_chain4;
@@ -178,7 +247,7 @@ namespace
     DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
     swap_chain_desc.Width = width;
     swap_chain_desc.Height = height;
-    swap_chain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swap_chain_desc.Format = format;
     swap_chain_desc.Stereo = FALSE;
     swap_chain_desc.SampleDesc.Count = 1;
     swap_chain_desc.SampleDesc.Quality = 0;
@@ -205,21 +274,103 @@ namespace
 
     check_hresult(swap_chain_1->QueryInterface(__uuidof(IDXGISwapChain4), (void**)&dxgi_swap_chain4));
 
+    zv_assert_msg(try_set_color_space(dxgi_swap_chain4, color_space), "Failed to set color space");
+
+    // TODO: Set HDR metadata??
+    // But: https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_5/nf-dxgi1_5-idxgiswapchain4-sethdrmetadata
+
     safe_release_com_ptr(swap_chain_1);
     safe_release_com_ptr(dxgi_factory4);
 
     return dxgi_swap_chain4;
   }
+
+#if 0 // TODO: Integrate this into DX12State
+void D3D12HDR::CheckDisplayHDRSupport()
+{
+    // If the display's advanced color state has changed (e.g. HDR display plug/unplug, or OS HDR setting on/off), 
+    // then this app's DXGI factory is invalidated and must be created anew in order to retrieve up-to-date display information. 
+    if (m_dxgiFactory->IsCurrent() == false)
+    {
+        ThrowIfFailed(
+            CreateDXGIFactory2(0, IID_PPV_ARGS(&m_dxgiFactory))
+        );
+    }
+
+    // First, the method must determine the app's current display. 
+    // We don't recommend using IDXGISwapChain::GetContainingOutput method to do that because of two reasons:
+    //    1. Swap chains created with CreateSwapChainForComposition do not support this method.
+    //    2. Swap chains will return a stale dxgi output once DXGIFactory::IsCurrent() is false. In addition, 
+    //       we don't recommend re-creating swapchain to resolve the stale dxgi output because it will cause a short 
+    //       period of black screen.
+    // Instead, we suggest enumerating through the bounds of all dxgi outputs and determine which one has the greatest 
+    // intersection with the app window bounds. Then, use the DXGI output found in previous step to determine if the 
+    // app is on a HDR capable display. 
+
+    // Retrieve the current default adapter.
+    ComPtr<IDXGIAdapter1> dxgiAdapter;
+    ThrowIfFailed(m_dxgiFactory->EnumAdapters1(0, &dxgiAdapter));
+
+    // Iterate through the DXGI outputs associated with the DXGI adapter,
+    // and find the output whose bounds have the greatest overlap with the
+    // app window (i.e. the output for which the intersection area is the
+    // greatest).
+
+    UINT i = 0;
+    ComPtr<IDXGIOutput> currentOutput;
+    ComPtr<IDXGIOutput> bestOutput;
+    float bestIntersectArea = -1;
+
+    while (dxgiAdapter->EnumOutputs(i, &currentOutput) != DXGI_ERROR_NOT_FOUND)
+    {
+        // Get the retangle bounds of the app window
+        int ax1 = m_windowBounds.left;
+        int ay1 = m_windowBounds.top;
+        int ax2 = m_windowBounds.right;
+        int ay2 = m_windowBounds.bottom;
+
+        // Get the rectangle bounds of current output
+        DXGI_OUTPUT_DESC desc;
+        ThrowIfFailed(currentOutput->GetDesc(&desc));
+        RECT r = desc.DesktopCoordinates;
+        int bx1 = r.left;
+        int by1 = r.top;
+        int bx2 = r.right;
+        int by2 = r.bottom;
+
+        // Compute the intersection
+        int intersectArea = ComputeIntersectionArea(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2);
+        if (intersectArea > bestIntersectArea)
+        {
+            bestOutput = currentOutput;
+            bestIntersectArea = static_cast<float>(intersectArea);
+        }
+
+        i++;
+    }
+
+    // Having determined the output (display) upon which the app is primarily being 
+    // rendered, retrieve the HDR capabilities of that display by checking the color space.
+    ComPtr<IDXGIOutput6> output6;
+    ThrowIfFailed(bestOutput.As(&output6));
+
+    DXGI_OUTPUT_DESC1 desc1;
+    ThrowIfFailed(output6->GetDesc1(&desc1));
+
+    m_hdrSupport = (desc1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
+}
+#endif
 }
 
 //-------------------------------
 //  DX12State Implementation
 //-------------------------------
 
-DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync, bool msaa_enabled)
+DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bool vsync, bool msaa_enabled, DX12OutputMode output_mode)
   : m_vsync(vsync)
   , m_frame_index(0)
   , m_msaa_enabled(msaa_enabled)
+  , m_output_mode(output_mode)
 {
 #if defined(ZV_DEBUG)
   // Always enable the debug layer before doing anything DX12 related
@@ -254,7 +405,7 @@ DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bo
     m_imgui_descriptors[i] = m_srv_render_pass_descriptor_heaps[i]->get_reserved_descriptor(k_imgui_reserved_descriptor_index);
   }
 
-  m_msaa_quality_level = check_msaa_quality_level(m_device.get(), DXGI_FORMAT_R8G8B8A8_UNORM, m_msaa_enabled ? 4 : 1);
+  m_msaa_quality_level = check_msaa_quality_level(m_device.get(), get_msaa_format(), m_msaa_enabled ? 4 : 1);
 
   // Create DSV heap
   D3D12_DESCRIPTOR_HEAP_DESC dsv_heap_desc = {};
@@ -269,6 +420,8 @@ DX12State::DX12State(HWND window_handle, u32 client_width, u32 client_height, bo
       client_width,
       client_height,
       k_num_back_buffers,
+      get_resource_format_from_output_mode(output_mode),
+      get_output_mode_color_space(output_mode),
       m_tearing_supported);
   m_swap_chain.reset(swap_chain);
 
@@ -355,6 +508,16 @@ DX12State::~DX12State()
 #endif
 }
 
+constexpr DXGI_FORMAT DX12State::get_back_buffer_format() const
+{
+  return get_resource_format_from_output_mode(m_output_mode);
+}
+
+constexpr DXGI_FORMAT DX12State::get_msaa_format() const
+{
+  return get_msaa_format_from_output_mode(m_output_mode);
+}
+
 void DX12State::flush_queues()
 {
   m_graphics_queue->flush();
@@ -369,7 +532,7 @@ void DX12State::update_render_target_views()
     DX12Descriptor back_buffer_rtv_handle = m_rtv_staging_descriptor_heap->create_descriptor();
 
     D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
-    rtv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    rtv_desc.Format = get_back_buffer_format();
     rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
     rtv_desc.Texture2D.MipSlice = 0;
     rtv_desc.Texture2D.PlaneSlice = 0;
@@ -437,7 +600,7 @@ void DX12State::resize(u32 width, u32 height)
 
   // Resize swap chain
   check_hresult(m_swap_chain->ResizeBuffers(
-    k_num_back_buffers, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 
+    k_num_back_buffers, width, height, get_back_buffer_format(), 
     m_tearing_supported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0));
   
   update_render_target_views();
@@ -477,7 +640,7 @@ void DX12State::create_msaa_render_target(u32 width, u32 height)
   }
 
   DX12TextureResource::Desc msaa_render_target_desc;
-  msaa_render_target_desc.m_format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+  msaa_render_target_desc.m_format = get_msaa_format();
   msaa_render_target_desc.m_width = width;
   msaa_render_target_desc.m_height = height;
   msaa_render_target_desc.m_view_flags.set(DX12TextureViewFlags::SRV);
@@ -1601,7 +1764,7 @@ void DX12GraphicsCommandContext::set_primitive_topology(D3D12_PRIMITIVE_TOPOLOGY
 
 void DX12GraphicsCommandContext::resolve_msaa_render_target(DX12TextureResource* msaa_rt, DX12TextureResource* current_back_buffer)
 {
-  m_command_list->ResolveSubresource(current_back_buffer->m_resource.get(), 0, msaa_rt->m_resource.get(), 0, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
+  m_command_list->ResolveSubresource(current_back_buffer->m_resource.get(), 0, msaa_rt->m_resource.get(), 0, m_dx12_state->get_msaa_format());
 }
 
 void DX12GraphicsCommandContext::draw_indexed(u32 index_count, u32 start_index, u32 base_vertex)

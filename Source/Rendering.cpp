@@ -60,12 +60,13 @@ namespace
 }
 
 
-Renderer::Renderer(HWND window_handle, u32 client_width, u32 client_height, bool msaa_enabled)
+Renderer::Renderer(HWND window_handle, u32 client_width, u32 client_height, bool msaa_enabled, DX12OutputMode output_mode, TonemapType tonemap_type)
   : m_client_width(client_width)
   , m_client_height(client_height)
   , m_msaa_enabled(msaa_enabled)
+  , m_tonemap_type(tonemap_type)
 {
-  m_dx12_state = make_unique_ptr<DX12State>(window_handle, client_width, client_height, false, msaa_enabled);
+  m_dx12_state = make_unique_ptr<DX12State>(window_handle, client_width, client_height, false, msaa_enabled, output_mode);
 
   m_dx12_graphics_ctx = m_dx12_state->create_graphics_context();
 
@@ -91,7 +92,7 @@ void Renderer::initialize_imgui(HWND window_handle)
     init_info.Device = m_dx12_state->get_device();
     init_info.CommandQueue = m_dx12_state->get_graphics_queue();
     init_info.NumFramesInFlight = k_num_frames_in_flight;
-    init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; // Or your render target format.
+    init_info.RTVFormat = m_dx12_state->get_back_buffer_format();
     init_info.LegacySingleSrvCpuDescriptor = descriptor.m_cpu_handle;
     init_info.LegacySingleSrvGpuDescriptor = descriptor.m_gpu_handle;
     init_info.LegacySingleSrvCpuDescriptor2 = descriptor2.m_cpu_handle;
@@ -511,16 +512,18 @@ void Renderer::create_default_graphics_pipeline()
 
   // Initialize per pass constant buffer
 
-  PerPassConstants pass_constants{};
-  m_frame_resources[0].m_per_pass_constant_buffer->copy_data(&pass_constants, sizeof(PerPassConstants));
+  m_frame_resources[0].m_per_pass_constant_buffer->copy_data(&m_per_pass_constants, sizeof(PerPassConstants));
 
   m_per_pass_resource_space.set_cbv(m_frame_resources[0].m_per_pass_constant_buffer.get());
   m_per_pass_resource_space.lock();
 
   // Initialize per frame constant buffer
 
-  PerFrameConstants frame_constants{};
-  m_frame_resources[0].m_per_frame_constant_buffer->copy_data(&frame_constants, sizeof(PerFrameConstants));
+  m_per_frame_constants.output_mode = static_cast<OutputMode>(m_dx12_state->get_output_mode());
+  m_per_frame_constants.reference_white_nits = m_dx12_state->get_reference_white_nits();
+  m_per_frame_constants.exposure = 1.0f;
+  m_per_frame_constants.tonemap_type = m_tonemap_type;
+  m_frame_resources[0].m_per_frame_constant_buffer->copy_data(&m_per_frame_constants, sizeof(PerFrameConstants));
 
   m_per_frame_resource_space.set_cbv(m_frame_resources[0].m_per_frame_constant_buffer.get());
   m_per_frame_resource_space.lock();
@@ -531,7 +534,7 @@ void Renderer::create_default_graphics_pipeline()
   pipeline_desc.m_vs_path = L"Shaders/Default_vs.cso";
   pipeline_desc.m_ps_path = L"Shaders/Default_ps.cso";
   pipeline_desc.m_render_target_desc.m_num_render_targets = 1;
-  pipeline_desc.m_render_target_desc.m_render_target_formats[0] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+  pipeline_desc.m_render_target_desc.m_render_target_formats[0] = m_dx12_state->get_back_buffer_format();
   pipeline_desc.m_render_target_desc.m_depth_stencil_format = DXGI_FORMAT_D32_FLOAT;
   pipeline_desc.m_spaces[DX12ResourceSpace::PerObjectSpace] = &m_per_object_resource_space;
   pipeline_desc.m_spaces[DX12ResourceSpace::PerMaterialSpace] = &m_per_material_resource_space;

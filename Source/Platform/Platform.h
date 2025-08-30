@@ -5,8 +5,11 @@
 #include <Platform/Jobs.h>
 #include <Utility.h>
 
+#include <Shaders/Shared.h>
+
 #if ZV_OS_WINDOWS
 #include <Platform/Win32/Win32Platform.h>
+#include <Platform/DX12/DX12.h>
 #endif
 
 class Renderer;
@@ -21,6 +24,9 @@ namespace Platform
         u32 m_width = 1280;
         u32 m_height = 720;
         u32 m_thread_count = 1;
+        bool m_msaa_enabled = true;
+        DX12OutputMode m_output_mode = DX12OutputMode::SDR;
+        TonemapType m_tonemap_type = TonemapType::Linear;
 #endif
     };
 

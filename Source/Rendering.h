@@ -87,7 +87,13 @@ struct MaterialData
 class Renderer
 {
 public:
-  Renderer(HWND window_handle, u32 client_width, u32 client_height, bool msaa_enabled = false);
+  Renderer(
+    HWND window_handle, 
+    u32 client_width, u32 client_height, 
+    bool msaa_enabled = false, 
+    DX12OutputMode output_mode = DX12OutputMode::SDR,
+    TonemapType tonemap_type = TonemapType::Linear
+  );
   ~Renderer();
 
 public:
@@ -107,7 +113,7 @@ public:
   DX12State* get_dx12_state() { return m_dx12_state.get(); }
 
   Camera* create_camera(
-    const Vector3& position = {0.0f, 1.0f, -5.0f}, // TODO: Change default values
+    const Vector3& position = {0.0f, 1.0f, -10.0f}, // TODO: Change default values
     const Vector3& look_at = {0.0f, 0.0f, 0.0f}, 
     const Vector3& up = {0.0f, 1.0f, 0.0f}, 
     f32 field_of_view = ZV_PI / 4.0f, 
@@ -172,6 +178,7 @@ private:
   u32 m_client_width = 0;
   u32 m_client_height = 0;
   bool m_msaa_enabled = false;
+  TonemapType m_tonemap_type = TonemapType::Linear;
   DynamicArray<UniquePtr<RenderTexture>> m_textures{};
   DynamicArray<UniquePtr<RenderObject>> m_render_objects{};
   DynamicArray<UniquePtr<MaterialData>> m_material_data{};

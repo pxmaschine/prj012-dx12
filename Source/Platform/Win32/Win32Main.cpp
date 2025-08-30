@@ -64,8 +64,20 @@ int CALLBACK WinMain(
   }
 
   Assets::initialize();
-  const u32 thread_count = win32_get_cpu_core_count() - 1;
-  Platform::initialize(Platform::CreationInfo{ hInstance, L"ZEngine", 1280, 720, thread_count });
+
+  DX12OutputMode output_mode = DX12OutputMode::scRGB;
+  TonemapType tonemap_type = TonemapType::Uncharted2;
+
+  Platform::CreationInfo creation_info{};
+  creation_info.m_instance = hInstance;
+  creation_info.m_window_title = L"ZEngine";
+  creation_info.m_width = 1280;
+  creation_info.m_height = 720;
+  creation_info.m_thread_count = win32_get_cpu_core_count() - 1;
+  creation_info.m_msaa_enabled = true;
+  creation_info.m_output_mode = output_mode;
+  creation_info.m_tonemap_type = tonemap_type;
+  Platform::initialize(creation_info);
   
   ZV::Input::initialize();
 
@@ -93,12 +105,12 @@ int CALLBACK WinMain(
 
     g_camera->get_transform(camera_position, camera_rotation);
 
-    Vector3 hemispheric_light_color = {0.025f, 0.025f, 0.025f};
-    renderer->set_hemispheric_light_color(hemispheric_light_color);
+    // Vector3 hemispheric_light_color = {0.025f, 0.025f, 0.025f};
+    // renderer->set_hemispheric_light_color(hemispheric_light_color);
 
     GlobalLight* global_light = renderer->create_global_light();
     global_light->direction = {0.0f, -1.0f, 0.0f, 1.0f};
-    global_light->intensity = 3.0f;
+    global_light->intensity = 6.0f;
     global_light->light_color = {1.0f, 1.0f, 1.0f};
   
     // PunctualLight* point_light = renderer->create_punctual_light();
@@ -117,8 +129,8 @@ int CALLBACK WinMain(
     // spot_light->direction = {0.0f, -1.0f, 0.0f};
     // spot_light->set_angle_scale_and_offset(30.0f * ZV_DEG_TO_RAD, 45.0f * ZV_DEG_TO_RAD);
 
-    Vector4 clear_color = {0.025f, 0.025f, 0.025f, 1.0f};
-    renderer->set_clear_color(clear_color);
+    Vector4 clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    renderer->set_clear_color(output_mode == DX12OutputMode::SDR ? clear_color : srgb_to_linear(clear_color));
 
     DebugPrimitive* debug_primitive_grid = renderer->create_debug_primitive(geometry);
     debug_primitive_grid->m_material_info.m_albedo_texture_id = AssetId("grid_albedo");

@@ -3,15 +3,17 @@
 
 #ifndef __cplusplus
 //This is a subset of HLSL types mapped to corresponding SimpleMath types
-#define u32               uint
-#define s32               int
-#define f32               float
-#define Vector2           float2
-#define Vector3           float3
-#define Vector4           float4
-#define Matrix            float4x4
-#define PunctualLightType uint
+#define u32                uint
+#define s32                int
+#define f32                float
+#define Vector2            float2
+#define Vector3            float3
+#define Vector4            float4
+#define Matrix             float4x4
+#define PunctualLightType  uint
 #define SamplerAddressMode uint
+#define OutputMode         uint
+#define TonemapType        uint
 
 struct VertexPosColor
 {
@@ -56,6 +58,23 @@ enum class SamplerAddressMode : u32
 {
     Clamp = 0,
     Wrap = 1,
+};
+
+enum class OutputMode : u32
+{
+    SDR = 0,
+    HDR10 = 1,
+    scRGB = 2,
+};
+
+enum class TonemapType : u32
+{
+    Linear = 0,
+    Reinhard = 1,
+    ExtendedReinhard = 2,
+    ACES = 3,
+    Uncharted2 = 4,
+    FilmicALU = 5,
 };
 
 #endif
@@ -157,6 +176,11 @@ struct PerFrameConstants
     PunctualLight punctual_lights[k_max_lights];
     u32 num_punctual_lights;
 
+    OutputMode output_mode;
+    TonemapType tonemap_type;
+    f32 exposure;
+    f32 reference_white_nits;
+
 #ifdef __cplusplus
     PerFrameConstants()
     {
@@ -165,6 +189,10 @@ struct PerFrameConstants
         global_light.intensity = 0.0f;
         global_light.light_color = Vector3(1.0f, 1.0f, 1.0f);
         num_punctual_lights = 0;
+        output_mode = OutputMode::SDR;
+        tonemap_type = TonemapType::Linear;
+        exposure = 1.0f;
+        reference_white_nits = 80.0f;
     }
 #endif
 };

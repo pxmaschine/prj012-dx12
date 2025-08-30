@@ -24,7 +24,14 @@ void Platform::initialize(const CreationInfo& creation_info)
 
 #if ZV_OS_WINDOWS
     win32_create_state(&s_platform_application->m_state, creation_info.m_instance, creation_info.m_window_title, creation_info.m_width, creation_info.m_height, creation_info.m_thread_count);
-    s_platform_application->m_renderer = make_unique_ptr<Renderer>(s_platform_application->m_state.m_window.m_window_handle, creation_info.m_width, creation_info.m_height, true);
+    s_platform_application->m_renderer = make_unique_ptr<Renderer>(
+        s_platform_application->m_state.m_window.m_window_handle, 
+        creation_info.m_width, 
+        creation_info.m_height, 
+        creation_info.m_msaa_enabled,
+        creation_info.m_output_mode,
+        creation_info.m_tonemap_type
+    );
 #endif
 }
 
